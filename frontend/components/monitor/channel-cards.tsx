@@ -26,7 +26,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog"
 import { useChannels, useChannelRates } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
-import { channelTypeLabel, money, relativeTime } from "@/lib/format"
+import { channelTypeLabel, formatRatio, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import type { Channel } from "@/lib/api-types"
@@ -135,7 +135,7 @@ function InlineRates({ channelID }: { channelID: number }) {
                   )}
                 >
                   <span className="font-medium">{r.model_name}</span>
-                  <span className="font-semibold tabular-nums">{r.ratio.toFixed(2)}</span>
+                  <span className="font-semibold tabular-nums">{formatRatio(r.ratio)}</span>
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="max-w-xs text-xs">

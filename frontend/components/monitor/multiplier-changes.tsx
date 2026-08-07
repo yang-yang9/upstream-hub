@@ -4,7 +4,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useDashboardSummary, useChannels } from "@/lib/queries"
-import { channelTypeLabel, ratioDelta, relativeTime, shortTime } from "@/lib/format"
+import { channelTypeLabel, formatRatio, ratioDelta, relativeTime, shortTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 
@@ -69,11 +69,11 @@ export function MultiplierChanges() {
                           <span className="text-muted-foreground">{"倍率"}</span>
                           <p className="mt-0.5 tabular-nums">
                             <span className="text-muted-foreground">
-                              {m.old_ratio == null ? "—" : m.old_ratio.toFixed(2)}
+                              {m.old_ratio == null ? "—" : formatRatio(m.old_ratio)}
                             </span>
                             <span className="mx-1 text-muted-foreground">{"→"}</span>
                             <span className={cn("font-medium", isUp ? "text-danger" : "text-success")}>
-                              {m.new_ratio.toFixed(2)}
+                              {formatRatio(m.new_ratio)}
                             </span>
                           </p>
                         </div>

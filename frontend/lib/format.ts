@@ -44,10 +44,21 @@ export function money(value: number | null | undefined, opts?: { precise?: boole
   )
 }
 
+/** 格式化倍率数值：最多 4 位小数，去掉末尾多余的 0，至少保留 2 位。 */
+export function formatRatio(value: number): string {
+  const s = value.toFixed(4)
+  const trimmed = parseFloat(s).toString()
+  const dot = trimmed.indexOf(".")
+  if (dot === -1) return trimmed + ".00"
+  const decimals = trimmed.length - dot - 1
+  if (decimals < 2) return trimmed + "0".repeat(2 - decimals)
+  return trimmed
+}
+
 /** 把倍率渲染成"1.20 → 1.50"。 */
 export function ratioArrow(from: number | null | undefined, to: number) {
-  const f = from == null ? "—" : from.toFixed(2)
-  return `${f} → ${to.toFixed(2)}`
+  const f = from == null ? "—" : formatRatio(from)
+  return `${f} → ${formatRatio(to)}`
 }
 
 /** 计算变化方向 / 百分比文案，比如 "+25.0%"。 */
