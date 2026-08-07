@@ -31,6 +31,9 @@ RUN pnpm build
 FROM golang:1.23-alpine AS go-builder
 WORKDIR /src
 
+ARG VERSION=0.0.0-dev
+ARG COMMIT=unknown
+
 # 先 go.mod / go.sum 走缓存
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -44,7 +47,10 @@ COPY --from=frontend-builder /web/dist ./web/dist
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
         -trimpath \
-        -ldflags="-s -w" \
+        -ldflags="-s -w \
+            -X github.com/worryzyy/upstream-hub/internal/version.Version=${VERSION} \
+            -X github.com/worryzyy/upstream-hub/internal/version.Commit=${COMMIT} \
+            -X github.com/worryzyy/upstream-hub/internal/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         -o /out/upstream-hub \
         ./cmd/server
 
@@ -54,6 +60,6 @@ RUN apk add --no-cache ca-certificates tzdata wget && \
     adduser -D -u 10001 upstream
 USER upstream
 WORKDIR /app
-COPY --from=go-builder /out/upstream-hub /app/upstream-hub
+COPY --from=go-builder --chown=upstream /out/upstream-hub /app/upstream-hub
 EXPOSE 8418
 ENTRYPOINT ["/app/upstream-hub"]

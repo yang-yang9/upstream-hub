@@ -23,6 +23,8 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/scheduler"
 	"github.com/worryzyy/upstream-hub/internal/storage"
+	"github.com/worryzyy/upstream-hub/internal/updater"
+	"github.com/worryzyy/upstream-hub/internal/version"
 	"github.com/worryzyy/upstream-hub/web"
 
 	// 注册 connector 实现。
@@ -41,7 +43,7 @@ func main() {
 	}
 
 	log := logger.New(cfg.Log.Level, cfg.Log.Format)
-	log.Info("starting upstream-hub", "port", cfg.Server.Port, "mode", cfg.Server.Mode)
+	log.Info("starting upstream-hub", "version", version.Version, "port", cfg.Server.Port, "mode", cfg.Server.Mode)
 
 	cipher, err := crypto.NewCipher(cfg.Security.AppSecret)
 	if err != nil {
@@ -98,6 +100,8 @@ func main() {
 	})
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log)
 
+	upd := updater.New(cfg.Updater.GithubRepo, cfg.Updater.GithubProxy, log)
+
 	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, log)
 	if err := sch.Start(); err != nil {
 		log.Error("start scheduler failed", "err", err)
@@ -135,6 +139,7 @@ func main() {
 		ChannelSvc: channelSvc,
 		Monitor:    monitorSvc,
 		Dispatcher: dispatcher,
+		Updater:    upd,
 		Log:        log,
 		Frontend:   frontendFS,
 	})

@@ -15,7 +15,13 @@ type Config struct {
 	Auth          AuthConfig          `mapstructure:"auth"`
 	Scheduler     SchedulerConfig     `mapstructure:"scheduler"`
 	Notifications NotificationsConfig `mapstructure:"notifications"`
+	Updater       UpdaterConfig       `mapstructure:"updater"`
 	Log           LogConfig           `mapstructure:"log"`
+}
+
+type UpdaterConfig struct {
+	GithubRepo  string `mapstructure:"githubRepo"`
+	GithubProxy string `mapstructure:"githubProxy"`
 }
 
 type ServerConfig struct {
@@ -153,6 +159,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("database.password", "UPSTREAMHUB_DATABASE_PASSWORD")
 	_ = v.BindEnv("database.name", "UPSTREAMHUB_DATABASE_NAME")
 	_ = v.BindEnv("database.sslMode", "UPSTREAMHUB_DATABASE_SSLMODE")
+	_ = v.BindEnv("updater.githubProxy", "GITHUB_PROXY")
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -204,4 +211,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "text")
+
+	v.SetDefault("updater.githubRepo", "worryzyy/upstream-hub")
+	v.SetDefault("updater.githubProxy", "")
 }

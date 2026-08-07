@@ -157,3 +157,12 @@ export interface BalanceTrendPoint {
   day: string
   balance: number
 }
+
+export interface UpgradeCheckResult {
+  current_version: string
+  latest_version: string
+  has_update: boolean
+  changelog: string
+  published_at: string
+  html_url: string
+}

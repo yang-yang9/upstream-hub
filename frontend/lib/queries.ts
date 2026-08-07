@@ -12,6 +12,7 @@ import type {
   NotificationLog,
   RateChangeLog,
   RateSnapshot,
+  UpgradeCheckResult,
 } from "@/lib/api-types"
 
 export interface QueryState<T> {
@@ -172,4 +173,8 @@ export function useNotificationLogs(limit = 20) {
 
 export function useCaptchaConfigs() {
   return useApi<CaptchaConfig[]>("/captcha-configs")
+}
+
+export function useUpgradeCheck() {
+  return useApi<UpgradeCheckResult>("/upgrade/check")
 }

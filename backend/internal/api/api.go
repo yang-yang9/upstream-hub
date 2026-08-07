@@ -16,6 +16,8 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/monitor"
 	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/storage"
+	"github.com/worryzyy/upstream-hub/internal/updater"
+	"github.com/worryzyy/upstream-hub/internal/version"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +35,7 @@ type Deps struct {
 	ChannelSvc *channel.Service
 	Monitor    *monitor.Service
 	Dispatcher *notify.Dispatcher
+	Updater    *updater.Updater
 	Log        *slog.Logger
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
@@ -60,7 +63,12 @@ func Register(r *gin.Engine, d *Deps) {
 	}
 	{
 		api.GET("/version", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"name": "upstream-hub", "version": "0.1.0-dev"})
+			c.JSON(http.StatusOK, gin.H{
+				"name":       "upstream-hub",
+				"version":    version.Version,
+				"commit":     version.Commit,
+				"build_time": version.BuildTime,
+			})
 		})
 
 		registerAuth(api, d)
@@ -70,6 +78,7 @@ func Register(r *gin.Engine, d *Deps) {
 		registerRates(api, d)
 		registerMonitorLogs(api, d)
 		registerDashboard(api, d)
+		registerUpgrade(api, d)
 	}
 
 	if d.Frontend != nil {

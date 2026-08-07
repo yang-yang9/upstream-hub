@@ -58,6 +58,11 @@ Caddyfile.demo
 deploy-demo.sh
 backend/cmd/seed-demo/
 
+# 本地预览/mock 工具脚本，不进 git
+mock-server.js
+preview-server.js
+supervisor.js
+
 # Frontend build info
 frontend/tsconfig.tsbuildinfo
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { useTheme } from "next-themes"
-import { Activity, Github, LogOut, RefreshCw, Sun, Moon } from "lucide-react"
+import { Activity, LogOut, RefreshCw, Settings, Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -18,6 +19,7 @@ export function MonitorHeader() {
   const { username, authDisabled, logout } = useAuth()
   const refresh = useTriggerRefresh()
   const channels = useChannels()
+  const navigate = useNavigate()
   const [mounted, setMounted] = useState(false)
   const [syncing, setSyncing] = useState(false)
 
@@ -103,27 +105,21 @@ export function MonitorHeader() {
             {"刷新"}
           </Button>
 
-          {/* GitHub repo link */}
+          {/* settings */}
           <Tooltip delayDuration={200}>
             <TooltipTrigger asChild>
               <Button
-                asChild
                 variant="outline"
                 size="icon"
+                onClick={() => navigate("/settings")}
                 className="size-8 border-border bg-background text-foreground hover:bg-muted"
-                aria-label="GitHub 仓库"
+                aria-label="系统设置"
               >
-                <a
-                  href="https://github.com/worryzyy/upstream-hub"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Github className="size-3.5" />
-                </a>
+                <Settings className="size-3.5" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              {"GitHub · worryzyy/upstream-hub"}
+              {"系统设置"}
             </TooltipContent>
           </Tooltip>
 
