@@ -100,7 +100,12 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	}
 	if data.ID == 0 {
 		// 用户 id 是后续 New-Api-User 头的必需值；缺失说明响应格式不对。
-		return nil, errors.New("newapi login: missing user id in response")
+		// 把原始 data 打进错误信息，便于定位 fork 变体的真实字段名。
+		raw := string(wrapped.Data)
+		if len(raw) > 256 {
+			raw = raw[:256] + "..."
+		}
+		return nil, fmt.Errorf("newapi login: missing user id in response (raw data: %s)", raw)
 	}
 	// NewAPI session 默认有效期较长，保守按 7 天估算；CheckAuth 会兜底失效检测。
 	return &connector.AuthSession{
