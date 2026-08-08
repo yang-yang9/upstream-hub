@@ -37,6 +37,7 @@ type ReleaseInfo struct {
 	Changelog      string `json:"changelog"`
 	PublishedAt    string `json:"published_at"`
 	HTMLURL        string `json:"html_url"`
+	Warning        string `json:"warning,omitempty"`
 }
 
 type githubRelease struct {
@@ -90,7 +91,14 @@ func (u *Updater) CheckLatest(ctx context.Context) (*ReleaseInfo, error) {
 
 	release, err := u.fetchLatestRelease(ctx)
 	if err != nil {
-		return nil, err
+		// 优雅降级：GitHub 拉不到（无 release / 网络不通）时不让整个请求失败，
+		// 至少把本地当前版本返回出去，并把原因放到 warning，前端照常显示当前版本。
+		return &ReleaseInfo{
+			CurrentVersion: version.Version,
+			LatestVersion: version.Version,
+			HasUpdate:      false,
+			Warning:        "检查更新失败：" + err.Error(),
+		}, nil
 	}
 
 	latest := strings.TrimPrefix(release.TagName, "v")

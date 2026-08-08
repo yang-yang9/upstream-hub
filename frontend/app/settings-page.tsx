@@ -125,6 +125,12 @@ export default function SettingsPage() {
               </span>
             </div>
 
+            {upgrade?.warning && (
+              <p className="rounded bg-warning/10 px-2 py-1 text-[11px] text-warning">
+                {upgrade.warning}
+              </p>
+            )}
+
             {upgrade?.has_update && upgrade.changelog && (
               <div>
                 <button

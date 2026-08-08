@@ -165,4 +165,5 @@ export interface UpgradeCheckResult {
   changelog: string
   published_at: string
   html_url: string
+  warning?: string
 }
