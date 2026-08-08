@@ -129,7 +129,7 @@ UPSTREAMHUB_DATABASE_NAME=upstreamhub \
 | UPSTREAMHUB_NOTIFICATIONS_BALANCELOWCOOLDOWNMINUTES | `60` | 同渠道 `balance_low` 推送冷却分钟。0=不冷却。 |
 | UPSTREAMHUB_NOTIFICATIONS_SENDMAXATTEMPTS | `3` | 通知失败最大尝试次数（含首次），指数退避。 |
 | **GITHUB_PROXY** *(特殊)* | — | 升级时访问 GitHub 的代理前缀，国内网络必填，如 `https://ghproxy.com`。详见下文「升级」。 |
-| UPSTREAMHUB_UPDATER_GITHUBREPO | `worryzyy/upstream-hub` | 升级检查的 GitHub 仓库。fork 自用时可改成自己的 `owner/repo`。 |
+| UPSTREAMHUB_UPDATER_GITHUBREPO | `yang-yang9/upstream-hub` | 升级检查的 GitHub 仓库。fork 自用且自行发版时改成自己的 `owner/repo`。 |
 | UPSTREAMHUB_LOG_LEVEL | `info` | 日志等级。 |
 | UPSTREAMHUB_LOG_FORMAT | `text` | 日志格式：`text` / `json`。 |
 | **UPSTREAMHUB_HTTP_PORT** *(compose)* | `8080` | 宿主机映射端口（容器内仍是 8418）。 |

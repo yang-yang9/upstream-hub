@@ -212,6 +212,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "text")
 
-	v.SetDefault("updater.githubRepo", "worryzyy/upstream-hub")
+	v.SetDefault("updater.githubRepo", "yang-yang9/upstream-hub")
 	v.SetDefault("updater.githubProxy", "")
 }
