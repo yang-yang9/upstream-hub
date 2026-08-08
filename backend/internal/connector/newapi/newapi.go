@@ -3,6 +3,7 @@ package newapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,8 +87,12 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	}
 
 	var data struct {
-		Require2FA bool  `json:"require_2fa"`
-		ID         int64 `json:"id"`
+		Require2FA       bool   `json:"require_2fa"`
+		ID               int64  `json:"id"`
+		AccessToken      string `json:"access_token"`
+		AccessExpiresAt  int64  `json:"access_expires_at"`
+		RefreshToken     string `json:"refresh_token"`
+		RefreshExpiresAt int64  `json:"refresh_expires_at"`
 	}
 	_ = json.Unmarshal(wrapped.Data, &data)
 	if data.Require2FA {
@@ -95,24 +100,70 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	}
 
 	cookie := joinCookies(resp.Cookies())
-	if cookie == "" {
-		return nil, errors.New("newapi login: no session cookie returned")
+
+	// 标准 NewAPI 登录返回 user 对象（data.id）+ session cookie；
+	// 部分 fork（如 new-api-das）返回 JWT access_token 而非 user 对象，
+	// 此时 user id 编码在 JWT 的 sub 声明里，后续请求改用 Bearer token 鉴权。
+	userID := strconv.FormatInt(data.ID, 10)
+	if userID == "0" && data.AccessToken != "" {
+		userID = jwtSub(data.AccessToken)
 	}
-	if data.ID == 0 {
-		// 用户 id 是后续 New-Api-User 头的必需值；缺失说明响应格式不对。
-		// 把原始 data 打进错误信息，便于定位 fork 变体的真实字段名。
+
+	if cookie == "" && data.AccessToken == "" {
+		return nil, errors.New("newapi login: no session cookie or access token returned")
+	}
+	if userID == "0" {
 		raw := string(wrapped.Data)
 		if len(raw) > 256 {
 			raw = raw[:256] + "..."
 		}
 		return nil, fmt.Errorf("newapi login: missing user id in response (raw data: %s)", raw)
 	}
-	// NewAPI session 默认有效期较长，保守按 7 天估算；CheckAuth 会兜底失效检测。
+
+	// 过期时间：优先用 access_expires_at；否则保守按 7 天估算，CheckAuth 会兜底失效检测。
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	if data.AccessExpiresAt > 0 {
+		expiresAt = time.Unix(data.AccessExpiresAt, 0)
+	}
 	return &connector.AuthSession{
-		UserID:    strconv.FormatInt(data.ID, 10),
-		Cookie:    cookie,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		UserID:     userID,
+		AccessToken: data.AccessToken,
+		Cookie:     cookie,
+		ExpiresAt:  expiresAt,
 	}, nil
+}
+
+// jwtSub 从 JWT（不验签）的 payload 里取 sub 声明，作为 user id。
+// 兼容 sub 为字符串或数字两种写法。
+func jwtSub(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payload, err = base64.URLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+	var claims map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	raw, ok := claims["sub"]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil && s != "" {
+		return s
+	}
+	var n int64
+	if json.Unmarshal(raw, &n) == nil {
+		return strconv.FormatInt(n, 10)
+	}
+	return ""
 }
 
 func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) error {
@@ -187,10 +238,15 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
 	req := c.http.R().SetContext(ctx)
 	if session != nil {
+		// token 鉴权 fork（new-api-das 等）登录返回 access_token，后续用 Bearer。
+		if session.AccessToken != "" {
+			req.SetHeader("Authorization", "Bearer "+session.AccessToken)
+		}
 		if session.Cookie != "" {
 			req.SetHeader("Cookie", session.Cookie)
 		}
 		// NewAPI 即便用 session 鉴权也要求带 New-Api-User 头（"unauthorized, New-Api-User header not provided"）。
+		// token 鉴权 fork 通常不需要，但带上也无害（user id 从 JWT sub 解析得到）。
 		if session.UserID != "" {
 			req.SetHeader("New-Api-User", session.UserID)
 		}
