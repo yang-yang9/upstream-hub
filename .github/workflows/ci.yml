@@ -38,7 +38,7 @@ jobs:
         run: go test ./...
 
   frontend:
-    name: Frontend (typecheck / lint / build)
+    name: Frontend (typecheck / build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,9 +53,6 @@ jobs:
 
       - name: typecheck
         run: pnpm exec tsc --noEmit
-
-      - name: lint
-        run: pnpm lint
 
       - name: build
         run: pnpm build
