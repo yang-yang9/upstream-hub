@@ -13,6 +13,9 @@ type ToasterToast = ToastProps & {
   action?: ToastActionElement
 }
 
+// actionTypes 仅通过 `typeof` 在类型位置使用，typescript-eslint 的 no-unused-vars
+// 会误报，这里显式忽略（值本身确实被类型查询引用）。
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const actionTypes = {
   ADD_TOAST: 'ADD_TOAST',
   UPDATE_TOAST: 'UPDATE_TOAST',
