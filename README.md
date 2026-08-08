@@ -17,8 +17,11 @@
 - 多上游渠道管理
 - 余额汇总和低余额提醒
 - 模型倍率监控和变化记录
+- 面板内一键升级重启
 - Cloudflare Turnstile 打码支持
 - Telegram、Webhook、邮件、企业微信、钉钉、飞书、Bark 通知
+
+> 完整部署、环境变量、升级、打码、通知、排障说明见 **[docs/deployment.md](docs/deployment.md)**。
 
 ## 启动方式
 
