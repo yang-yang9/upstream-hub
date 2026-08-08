@@ -34,10 +34,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # QEMU 让 amd64 runner 能跑 arm64 emulation 出 ARM 镜像。
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -66,14 +62,14 @@ jobs:
           flavor: |
             latest=false
 
-      # 多架构构建 + 推送。GitHub Actions 内置 cache (type=gha) 把
-      # 前端 pnpm install 和后端 go mod download 都缓存住，二次构建 1-2 分钟。
+      # 单架构构建（amd64）。arm64 需要在 QEMU 下跑前端 pnpm install，极慢，
+      # 暂时关闭；后续如需 arm64，用原生 arm64 runner 或把前端构建拆成共享 stage。
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
