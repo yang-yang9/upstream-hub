@@ -27,7 +27,7 @@ type Client struct {
 
 func New() *Client {
 	c := resty.New().
-		SetTimeout(30 * time.Second).
+		SetTimeout(30*time.Second).
 		SetHeader("User-Agent", "upstream-hub/0.1").
 		SetHeader("Accept", "application/json")
 	return &Client{http: c}
@@ -126,10 +126,10 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 		expiresAt = time.Unix(data.AccessExpiresAt, 0)
 	}
 	return &connector.AuthSession{
-		UserID:     userID,
+		UserID:      userID,
 		AccessToken: data.AccessToken,
-		Cookie:     cookie,
-		ExpiresAt:  expiresAt,
+		Cookie:      cookie,
+		ExpiresAt:   expiresAt,
 	}, nil
 }
 
@@ -167,8 +167,8 @@ func jwtSub(token string) string {
 }
 
 func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) error {
-	if session == nil || session.Cookie == "" {
-		return errors.New("missing newapi cookie")
+	if session == nil || (session.Cookie == "" && session.AccessToken == "") {
+		return errors.New("missing newapi cookie or access token")
 	}
 	_, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self", session)
 	return err

@@ -52,11 +52,13 @@ func NewService(
 
 // NewAPITokenCredential token 模式下 NewAPI 的凭据 JSON 结构。
 //
-// Cookie：浏览器 DevTools 里拷出来的整条 Cookie 头
-// UserID：上游账号 ID（NewAPI 个人设置页可见，作为 New-Api-User 请求头必填）
+// AccessToken：NewAPI 用户 Access Token，以 Authorization: Bearer 发送；优先使用，不创建网页会话。
+// Cookie：浏览器 DevTools 里拷出来的整条 Cookie 头（兼容旧站点）。
+// UserID：上游账号 ID（旧 Cookie 鉴权时作为 New-Api-User 请求头必填）。
 type NewAPITokenCredential struct {
-	Cookie string `json:"cookie"`
-	UserID string `json:"user_id"`
+	AccessToken string `json:"access_token"`
+	Cookie      string `json:"cookie"`
+	UserID      string `json:"user_id"`
 }
 
 // Sub2APITokenCredential token 模式下 Sub2API 的凭据。
@@ -255,8 +257,11 @@ func validateCredential(channelType storage.ChannelType, mode storage.Credential
 		if err := json.Unmarshal([]byte(raw), &cred); err != nil {
 			return fmt.Errorf("解析 NewAPI 凭据 JSON 失败：%w", err)
 		}
+		if strings.TrimSpace(cred.AccessToken) != "" {
+			return nil
+		}
 		if strings.TrimSpace(cred.Cookie) == "" {
-			return errors.New("NewAPI token 模式需要 Cookie")
+			return errors.New("NewAPI token 模式需要 Access Token，或 Cookie + User ID")
 		}
 		if strings.TrimSpace(cred.UserID) == "" {
 			return errors.New("NewAPI token 模式需要 User ID（在 NewAPI 个人设置页查看）")
@@ -323,9 +328,10 @@ func (s *Service) buildSessionFromToken(c *storage.Channel) (*connector.AuthSess
 			return nil, fmt.Errorf("parse newapi token credential: %w", err)
 		}
 		return &connector.AuthSession{
-			UserID:    cred.UserID,
-			Cookie:    cred.Cookie,
-			ExpiresAt: time.Now().Add(tokenSessionTTL),
+			UserID:      cred.UserID,
+			AccessToken: cred.AccessToken,
+			Cookie:      cred.Cookie,
+			ExpiresAt:   time.Now().Add(tokenSessionTTL),
 		}, nil
 	case storage.ChannelTypeSub2API:
 		var cred Sub2APITokenCredential

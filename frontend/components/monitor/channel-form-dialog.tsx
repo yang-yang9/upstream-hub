@@ -56,6 +56,7 @@ interface FormState {
 
   credential_mode: CredentialMode
   // NewAPI token 模式
+  newapi_access_token: string
   newapi_cookie: string
   newapi_user_id: string
   // Sub2API token 模式
@@ -75,6 +76,7 @@ function initialState(c?: Channel | null): FormState {
     username: c?.username ?? "",
     password: "",
     credential_mode: c?.credential_mode ?? "password",
+    newapi_access_token: "",
     newapi_cookie: "",
     newapi_user_id: "",
     sub2api_access_token: "",
@@ -92,6 +94,7 @@ function initialState(c?: Channel | null): FormState {
 function buildTokenCredential(form: FormState): string {
   if (form.type === "newapi") {
     return JSON.stringify({
+      access_token: form.newapi_access_token.trim(),
       cookie: form.newapi_cookie.trim(),
       user_id: form.newapi_user_id.trim(),
     })
@@ -135,9 +138,12 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
       let tokenCredential = ""
       if (isTokenMode) {
         if (form.type === "newapi") {
-          if (!isEdit || modeChanged || form.newapi_cookie || form.newapi_user_id) {
-            if (!form.newapi_cookie.trim()) throw new Error("NewAPI token 模式必须填写 Cookie")
-            if (!form.newapi_user_id.trim()) throw new Error("NewAPI token 模式必须填写 User ID")
+          if (!isEdit || modeChanged || form.newapi_access_token || form.newapi_cookie || form.newapi_user_id) {
+            const hasAccessToken = form.newapi_access_token.trim().length > 0
+            const hasCookieCredential = form.newapi_cookie.trim().length > 0 && form.newapi_user_id.trim().length > 0
+            if (!hasAccessToken && !hasCookieCredential) {
+              throw new Error("NewAPI token 模式必须填写 Access Token，或 Cookie + User ID")
+            }
           }
         } else {
           if (!isEdit || modeChanged || form.sub2api_access_token) {
@@ -151,6 +157,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           modeChanged ||
           form.newapi_cookie ||
           form.newapi_user_id ||
+          form.newapi_access_token ||
           form.sub2api_access_token
         ) {
           tokenCredential = buildTokenCredential(form)
@@ -303,7 +310,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             </div>
             <p className="text-[11px] text-muted-foreground">
               {isTokenMode
-                ? "粘贴浏览器里已登录后的 Token / Cookie。失效时需要手动重新粘贴。"
+                ? "优先填写 NewAPI Access Token，无需浏览器 Cookie；也兼容 Cookie + User ID。"
                 : "提供账号密码，系统自动登录并续期。可能需要配打码 provider。"}
             </p>
           </div>
@@ -358,6 +365,23 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
 
               {form.type === "newapi" ? (
                 <>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="newapi-access-token">Access Token</Label>
+                      <NewAPITokenHelp />
+                    </div>
+                    <Textarea
+                      id="newapi-access-token"
+                      placeholder={isEdit ? "留空 = 不修改；优先使用 Access Token" : "粘贴 NewAPI Access Token"}
+                      value={form.newapi_access_token}
+                      onChange={(e) => setForm({ ...form, newapi_access_token: e.target.value })}
+                      rows={3}
+                      className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono"
+                      disabled={submitting}
+                    />
+                    <p className="text-[11px] text-muted-foreground">填写后无需 Cookie 和 User ID，不会创建网页登录会话。</p>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">留空 Access Token 时，可使用下方 Cookie + User ID 兼容旧站点。</p>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="newapi-cookie">Cookie</Label>
@@ -516,7 +540,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
 }
 
 /**
- * NewAPITokenHelp 是 Cookie / User ID 的获取指引浮窗。
+ * NewAPITokenHelp 是 NewAPI Access Token 与 Cookie / User ID 的获取指引浮窗。
  * 用 Popover 而不是新页面 / 新对话框，避免在表单流程中打断用户。
  */
 function NewAPITokenHelp() {
@@ -532,7 +556,11 @@ function NewAPITokenHelp() {
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80 text-xs" align="end">
-        <p className="font-medium text-foreground">获取 Cookie</p>
+        <p className="font-medium text-foreground">优先使用 Access Token</p>
+        <p className="mt-1 text-muted-foreground">
+          在 NewAPI 的个人设置页生成或查看 <span className="font-mono text-foreground">Access Token</span>，粘贴到上方即可。它通过 Bearer 鉴权读取余额和分组，不会创建网页登录会话。
+        </p>
+        <p className="mt-2 font-medium text-foreground">兼容 Cookie 登录</p>
         <ol className="mt-1 ml-4 list-decimal space-y-0.5 text-muted-foreground">
           <li>在浏览器登录 NewAPI 站点</li>
           <li>按 F12 打开 DevTools，切到 Application / 存储 标签</li>
