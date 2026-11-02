@@ -64,6 +64,7 @@ func main() {
 			cfg.Auth.Password,
 			tokenSecret,
 			time.Duration(cfg.Auth.SessionTTLHours)*time.Hour,
+			time.Duration(cfg.Auth.MaxSessionTTLHours)*time.Hour,
 		)
 		if err != nil {
 			log.Error("init auth failed (set ADMIN_USERNAME / ADMIN_PASSWORD or AUTH_ENABLED=false)", "err", err)

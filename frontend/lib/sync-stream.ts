@@ -2,7 +2,7 @@
  * SSE 流读取：用 fetch 而非 EventSource，以便附带 Authorization Bearer 头。
  */
 
-import { getToken, notifyUnauthorized } from "@/lib/api"
+import { applyRenewedToken, getToken, notifyUnauthorized } from "@/lib/api"
 
 export type ProgressStage =
   | "captcha"
@@ -52,6 +52,8 @@ async function streamSSE(
     const body = await res.text().catch(() => "")
     throw new Error(`${path} 请求失败 (${res.status}): ${body || res.statusText}`)
   }
+  // 滑动续期：响应头在流开始前即可读取
+  applyRenewedToken(res)
   if (!res.body) {
     throw new Error("浏览器不支持流式响应")
   }

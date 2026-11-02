@@ -104,6 +104,7 @@ UPSTREAMHUB_DATABASE_NAME=upstreamhub \
 | **ADMIN_USERNAME** *(特殊)* | `admin` | 后台登录账号，`AUTH_ENABLED=true` 时生效。 |
 | **ADMIN_PASSWORD** *(特殊)* | — | 后台登录密码，`AUTH_ENABLED=true` 时必填。 |
 | **AUTH_TOKEN_SECRET** *(特殊)* | 回退用 APP_SECRET | HMAC token 签名密钥，留空时回退使用 `APP_SECRET`。 |
+| **AUTH_MAX_SESSION_TTL_HOURS** *(特殊)* | `720` | token 滑动续期的累计有效期上限（小时），自首次登录起算，到点强制重新登录。`0` = 不封顶。 |
 | UPSTREAMHUB_SERVER_PORT | `8418` | 后端监听端口（容器内）。 |
 | UPSTREAMHUB_SERVER_MODE | `debug` | Gin 模式：`release` / `debug`。生产用 `release`。 |
 | UPSTREAMHUB_SERVER_BASEURL | `http://localhost:8418` | 对外 base URL。 |
@@ -140,7 +141,7 @@ UPSTREAMHUB_DATABASE_NAME=upstreamhub \
 ## 三、鉴权与公网暴露
 
 - **纯内网 / 反代后**：`AUTH_ENABLED=false`（默认），所有 `/api/*` 免登录。前置 nginx/网关做 IP 白名单或 SSO。
-- **公网暴露**：必须 `AUTH_ENABLED=true` + 强 `ADMIN_PASSWORD`。前端首次访问跳登录页，登录后下发 HMAC token（存 localStorage，默认 7 天有效，见 `auth.sessionTTLHours`）。
+- **公网暴露**：必须 `AUTH_ENABLED=true` + 强 `ADMIN_PASSWORD`。前端首次访问跳登录页，登录后下发 HMAC token（存 localStorage，默认 7 天有效，见 `auth.sessionTTLHours`）。token 支持滑动续期：活跃使用时后端自动通过响应头下发新 token（前端无感替换），闲置超过 `auth.sessionTTLHours` 才需重新登录；自首次登录起累计最长 `AUTH_MAX_SESSION_TTL_HOURS`（默认 720 小时 = 30 天，`0` 不封顶）。
 
 反向代理示例（nginx，把 8080 转到 443）：
 

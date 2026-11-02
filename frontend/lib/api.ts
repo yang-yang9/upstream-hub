@@ -4,6 +4,7 @@
  * 设计目标：
  *   - 不引入 axios，沿用浏览器自带 fetch
  *   - token 存 localStorage，刷新页面后保持登录
+ *   - 响应带 X-Renewed-Token 时无感替换本地 token（滑动续期）
  *   - 401 时触发 onUnauthorized，让上层清空 state、回到登录页
  */
 
@@ -33,6 +34,17 @@ export function setToken(token: string | null) {
 export function notifyUnauthorized() {
   setToken(null)
   unauthorizedHandler?.()
+}
+
+/** 滑动续期响应头名，与后端 auth.RenewedTokenHeader 对应。 */
+export const RENEWED_TOKEN_HEADER = "X-Renewed-Token"
+
+/** 响应里带了新 token 就替换本地的（fetch / SSE 通用）。 */
+export function applyRenewedToken(res: Response) {
+  const renewed = res.headers.get(RENEWED_TOKEN_HEADER)
+  if (renewed) {
+    setToken(renewed)
+  }
 }
 
 export interface ApiError extends Error {
@@ -67,6 +79,9 @@ export async function apiFetch<T = unknown>(
   }
 
   const res = await fetch(url, { ...options, headers })
+
+  // 滑动续期：后端在 token 剩余寿命不足时通过该响应头下发新 token，无感替换。
+  applyRenewedToken(res)
 
   if (res.status === 401 && !options.skipAuthErrorHandler) {
     setToken(null)

@@ -69,12 +69,16 @@ type SecurityConfig struct {
 //
 // Enabled=true 时 Username/Password 是写死的管理员凭据，TokenSecret 用于签发 HMAC token。
 // 如果 TokenSecret 为空，会回退使用 Security.AppSecret，保证有合理默认。
+//
+// token 支持滑动续期：活跃请求会让 token 自动延期（见 auth 包），MaxSessionTTLHours
+// 是自首次登录起算的累计有效期上限，防止 token 被无限保活；0 表示不封顶。
 type AuthConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`
-	Username        string `mapstructure:"username"`
-	Password        string `mapstructure:"password"`
-	TokenSecret     string `mapstructure:"tokenSecret"`
-	SessionTTLHours int    `mapstructure:"sessionTTLHours"`
+	Enabled            bool   `mapstructure:"enabled"`
+	Username           string `mapstructure:"username"`
+	Password           string `mapstructure:"password"`
+	TokenSecret        string `mapstructure:"tokenSecret"`
+	SessionTTLHours    int    `mapstructure:"sessionTTLHours"`
+	MaxSessionTTLHours int    `mapstructure:"maxSessionTTLHours"`
 }
 
 type SchedulerConfig struct {
@@ -150,6 +154,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("auth.username", "ADMIN_USERNAME")
 	_ = v.BindEnv("auth.password", "ADMIN_PASSWORD")
 	_ = v.BindEnv("auth.tokenSecret", "AUTH_TOKEN_SECRET")
+	_ = v.BindEnv("auth.maxSessionTTLHours", "AUTH_MAX_SESSION_TTL_HOURS")
 	// Viper 坑：AutomaticEnv 只对已通过 SetDefault / BindEnv / 配置文件注册过的 key 生效；
 	// 数据库的 user/password/name 没有合理的默认值（拒绝写"change-me"作默认），
 	// 因此显式 BindEnv 以确保从环境变量读取。
@@ -200,7 +205,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("auth.enabled", false)
 	v.SetDefault("auth.username", "admin")
-	v.SetDefault("auth.sessionTTLHours", 168) // 7 天
+	v.SetDefault("auth.sessionTTLHours", 168)   // 7 天
+	v.SetDefault("auth.maxSessionTTLHours", 720) // 滑动续期累计上限 30 天；0 = 不封顶
 
 	// 通知去抖：默认开合并、不过滤涨跌幅、balance_low 1h 内不重复、失败重试 3 次。
 	// 即"默认行为是合并刷屏 + 不重复 balance_low + 抗短时网络抖动"，不丢任何 rate_changed 事件。
