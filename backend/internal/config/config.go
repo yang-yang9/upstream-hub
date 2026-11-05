@@ -154,6 +154,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("auth.username", "ADMIN_USERNAME")
 	_ = v.BindEnv("auth.password", "ADMIN_PASSWORD")
 	_ = v.BindEnv("auth.tokenSecret", "AUTH_TOKEN_SECRET")
+	_ = v.BindEnv("auth.sessionTTLHours", "AUTH_SESSION_TTL_HOURS")
 	_ = v.BindEnv("auth.maxSessionTTLHours", "AUTH_MAX_SESSION_TTL_HOURS")
 	// Viper 坑：AutomaticEnv 只对已通过 SetDefault / BindEnv / 配置文件注册过的 key 生效；
 	// 数据库的 user/password/name 没有合理的默认值（拒绝写"change-me"作默认），

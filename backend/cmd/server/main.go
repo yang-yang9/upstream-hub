@@ -70,6 +70,7 @@ func main() {
 			log.Error("init auth failed (set ADMIN_USERNAME / ADMIN_PASSWORD or AUTH_ENABLED=false)", "err", err)
 			os.Exit(1)
 		}
+		authSvc.SetLogger(log)
 		log.Info("auth enabled", "username", cfg.Auth.Username)
 	} else {
 		log.Warn("auth disabled — all /api/* endpoints are open; set AUTH_ENABLED=true for production exposure")

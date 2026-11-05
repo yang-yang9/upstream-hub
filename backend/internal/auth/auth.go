@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ type Service struct {
 	secret      []byte
 	tokenTTL    time.Duration
 	absoluteTTL time.Duration // 滑动续期累计上限（自 iat 起算）；<= 0 表示不封顶
+	logger      *slog.Logger  // nil 时回退 slog.Default()
 }
 
 // New 构造 Service。secret 推荐 32 字节以上；若为空报错。
@@ -53,6 +55,16 @@ func New(username, password, secret string, ttl, absoluteTTL time.Duration) (*Se
 		absoluteTTL: absoluteTTL,
 	}, nil
 }
+
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
+// SetLogger 注入日志器，方便对接外部 slog.Logger。
+func (s *Service) SetLogger(l *slog.Logger) { s.logger = l }
 
 // claims 是签发到 token payload 里的最小必要字段。
 // Iat 记录首次签发时间，续期时保留；旧 token 缺 iat（=0）时跳过绝对上限检查。
@@ -144,6 +156,11 @@ func (s *Service) Renew(c claims) (string, bool) {
 	} else if s.absoluteTTL > 0 {
 		if maxExp := iat + int64(s.absoluteTTL/time.Second); expiresAt.Unix() > maxExp {
 			expiresAt = time.Unix(maxExp, 0)
+			s.log().Warn("token renewal clamped by absolute TTL",
+				"sub", c.Sub,
+				"iat", iat,
+				"max_ttl", s.absoluteTTL.String(),
+			)
 		}
 		if !expiresAt.After(now) {
 			return "", false
@@ -214,6 +231,12 @@ func (s *Service) Middleware() gin.HandlerFunc {
 		if renewed, ok := s.Renew(cl); ok {
 			// 头要在 handler 写响应前设置，流式（SSE）响应同样带上
 			c.Header(RenewedTokenHeader, renewed)
+			s.log().Info("token renewed",
+				"sub", sub,
+				"iat", cl.Iat,
+				"old_exp", cl.Exp,
+				"ttl", s.tokenTTL.String(),
+			)
 		}
 		c.Set("authSubject", sub)
 		c.Next()
