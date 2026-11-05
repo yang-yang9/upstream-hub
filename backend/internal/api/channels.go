@@ -40,6 +40,7 @@ type channelInput struct {
 	TokenCredential  string                 `json:"token_credential"` // JSON：token 模式时填写
 	TurnstileEnabled bool                   `json:"turnstile_enabled"`
 	CaptchaConfigID  *uint                  `json:"captcha_config_id"`
+	Proxy            string                 `json:"proxy"`
 	BalanceThreshold float64                `json:"balance_threshold"`
 	MonitorEnabled   bool                   `json:"monitor_enabled"`
 }
@@ -53,6 +54,7 @@ type channelUpdateInput struct {
 	TokenCredential  *string                 `json:"token_credential"`
 	TurnstileEnabled *bool                   `json:"turnstile_enabled"`
 	CaptchaConfigID  *uint                   `json:"captcha_config_id"`
+	Proxy            *string                 `json:"proxy"`
 	BalanceThreshold *float64                `json:"balance_threshold"`
 	MonitorEnabled   *bool                   `json:"monitor_enabled"`
 }
@@ -82,6 +84,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		TokenCredential:  in.TokenCredential,
 		TurnstileEnabled: in.TurnstileEnabled,
 		CaptchaConfigID:  in.CaptchaConfigID,
+		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
 	})
@@ -126,6 +129,7 @@ func updateChannel(c *gin.Context, d *Deps) {
 		TokenCredential:  in.TokenCredential,
 		TurnstileEnabled: in.TurnstileEnabled,
 		CaptchaConfigID:  in.CaptchaConfigID,
+		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
 	})

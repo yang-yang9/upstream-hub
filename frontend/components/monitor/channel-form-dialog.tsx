@@ -61,11 +61,13 @@ interface FormState {
   newapi_user_id: string
   // Sub2API token 模式
   sub2api_access_token: string
+  sub2api_refresh_token: string
 
   balance_threshold: string
   monitor_enabled: boolean
   turnstile_enabled: boolean
   captcha_config_id: string // "" 表示不绑定
+  proxy: string
 }
 
 function initialState(c?: Channel | null): FormState {
@@ -80,10 +82,12 @@ function initialState(c?: Channel | null): FormState {
     newapi_cookie: "",
     newapi_user_id: "",
     sub2api_access_token: "",
+    sub2api_refresh_token: "",
     balance_threshold: c?.balance_threshold != null ? String(c.balance_threshold) : "0",
     monitor_enabled: c?.monitor_enabled ?? true,
     turnstile_enabled: c?.turnstile_enabled ?? false,
     captcha_config_id: c?.captcha_config_id != null ? String(c.captcha_config_id) : "",
+    proxy: c?.proxy ?? "",
   }
 }
 
@@ -101,6 +105,7 @@ function buildTokenCredential(form: FormState): string {
   }
   return JSON.stringify({
     access_token: form.sub2api_access_token.trim(),
+    refresh_token: form.sub2api_refresh_token.trim(),
   })
 }
 
@@ -146,10 +151,12 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             }
           }
         } else {
-          if (!isEdit || modeChanged || form.sub2api_access_token) {
+          if (!isEdit || modeChanged || form.sub2api_access_token || form.sub2api_refresh_token) {
             if (!form.sub2api_access_token.trim())
               throw new Error("Sub2API token 模式必须填写 Access Token")
           }
+          if (form.sub2api_refresh_token.trim() && !form.sub2api_access_token.trim())
+            throw new Error("更新 Refresh Token 时请同时填写配套的 Access Token")
         }
         // 只在用户填写了字段、或者首次创建、或者切换模式时下发 token_credential
         if (
@@ -158,7 +165,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           form.newapi_cookie ||
           form.newapi_user_id ||
           form.newapi_access_token ||
-          form.sub2api_access_token
+          form.sub2api_access_token ||
+          form.sub2api_refresh_token
         ) {
           tokenCredential = buildTokenCredential(form)
         }
@@ -188,6 +196,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           monitor_enabled: form.monitor_enabled,
           turnstile_enabled: !isTokenMode && form.turnstile_enabled,
           captcha_config_id: captchaConfigID,
+          proxy: form.proxy.trim(),
         }
         if (!isTokenMode && form.password) body.password = form.password
         if (isTokenMode && tokenCredential) body.token_credential = tokenCredential
@@ -210,6 +219,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             monitor_enabled: form.monitor_enabled,
             turnstile_enabled: !isTokenMode && form.turnstile_enabled,
             captcha_config_id: captchaConfigID,
+            proxy: form.proxy.trim(),
           }),
         })
       }
@@ -277,6 +287,20 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             />
           </div>
 
+          <div className="space-y-1.5">
+            <Label htmlFor="proxy">代理（可选）</Label>
+            <Input
+              id="proxy"
+              placeholder="socks5://127.0.0.1:10808"
+              value={form.proxy}
+              onChange={(e) => setForm({ ...form, proxy: e.target.value })}
+              disabled={submitting}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              该渠道被上游按地区封锁（403）时，可填 SOCKS5/HTTP 代理绕过；留空走直连。
+            </p>
+          </div>
+
           {/* 凭据类型 toggle */}
           <div className="space-y-1.5">
             <Label>凭据类型</Label>
@@ -310,7 +334,9 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             </div>
             <p className="text-[11px] text-muted-foreground">
               {isTokenMode
-                ? "优先填写 NewAPI Access Token，无需浏览器 Cookie；也兼容 Cookie + User ID。"
+                ? form.type === "sub2api"
+                  ? "填写 Access Token；同时提供同一登录会话的 Refresh Token 可自动续期。"
+                  : "优先填写 NewAPI Access Token，无需浏览器 Cookie；也兼容 Cookie + User ID。"
                 : "提供账号密码，系统自动登录并续期。可能需要配打码 provider。"}
             </p>
           </div>
@@ -319,7 +345,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           {!isTokenMode ? (
             <>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
+                  <div className="space-y-1.5">
                   <Label htmlFor="username">账号 / 邮箱</Label>
                   <Input
                     id="username"
@@ -419,26 +445,35 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
               ) : null}
 
               {form.type === "sub2api" ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="sub2api-token">Access Token</Label>
-                    <Sub2APITokenHelp />
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="sub2api-token">Access Token</Label>
+                      <Sub2APITokenHelp />
+                    </div>
+                    <Textarea
+                      id="sub2api-token"
+                      placeholder={isEdit ? "留空 = 不修改；填写则覆盖原 token" : "粘贴 access_token"}
+                      value={form.sub2api_access_token}
+                      onChange={(e) => setForm({ ...form, sub2api_access_token: e.target.value })}
+                      rows={3}
+                      className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono"
+                      disabled={submitting}
+                    />
                   </div>
-                  <Textarea
-                    id="sub2api-token"
-                    placeholder={
-                      isEdit
-                        ? "留空 = 不修改；填写则覆盖原 token"
-                        : "粘贴 access_token"
-                    }
-                    value={form.sub2api_access_token}
-                    onChange={(e) =>
-                      setForm({ ...form, sub2api_access_token: e.target.value })
-                    }
-                    rows={3}
-                    className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono"
-                    disabled={submitting}
-                  />
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sub2api-refresh-token">Refresh Token（可选）</Label>
+                    <Textarea
+                      id="sub2api-refresh-token"
+                      placeholder={isEdit ? "两个字段都留空 = 不修改；更新 Access Token 时请一并填写" : "粘贴 refresh_token 以启用自动续期"}
+                      value={form.sub2api_refresh_token}
+                      onChange={(e) => setForm({ ...form, sub2api_refresh_token: e.target.value })}
+                      rows={3}
+                      className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono"
+                      disabled={submitting}
+                    />
+                    <p className="text-[11px] text-muted-foreground">请从同一次登录复制两个 token。只更新 Access Token 会关闭自动续期；刷新后的令牌会加密保存。</p>
+                  </div>
                 </div>
               ) : null}
             </>
@@ -589,15 +624,15 @@ function Sub2APITokenHelp() {
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80 text-xs" align="end">
-        <p className="font-medium text-foreground">获取 Access Token</p>
+        <p className="font-medium text-foreground">获取 Access Token 和 Refresh Token</p>
         <ol className="mt-1 ml-4 list-decimal space-y-0.5 text-muted-foreground">
           <li>在浏览器登录 Sub2API 站点</li>
           <li>按 F12 打开 DevTools，切到 Application / 存储 标签</li>
           <li>左侧 Local Storage 选中站点域名</li>
-          <li>找到 <span className="font-mono text-foreground">access_token</span> 字段并复制</li>
+          <li>复制同一次登录的 <span className="font-mono text-foreground">access_token</span> 和 <span className="font-mono text-foreground">refresh_token</span> 字段</li>
         </ol>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          也可以在 Network 标签里找任意接口的 <span className="font-mono">Authorization</span> 头，去掉 <span className="font-mono">Bearer </span> 前缀。
+          也可以在 Network 标签查看登录响应中的两个 token。Refresh Token 每次续期后会更换，请避免浏览器与本系统同时使用同一组凭据续期。
         </p>
       </PopoverContent>
     </Popover>

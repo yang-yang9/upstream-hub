@@ -4,10 +4,12 @@ package channel
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/worryzyy/upstream-hub/internal/captcha"
@@ -21,17 +23,18 @@ import (
 const SessionRefreshThreshold = 5 * time.Minute
 
 // tokenSessionTTL token 模式下"假装"给 AuthSession 的有效期。
-// token 由用户提供，我们没法续期，这里设一年只是为了避免 SessionRefreshThreshold 把它判过期。
-// 真正失效检测靠 connector.CheckAuth + 上游 401/403。
+// 对不支持 refresh_token 的 token 模式，真实失效检测依赖上游校验。
+// Sub2API 配置了 refresh_token 时会使用上游刷新接口并保存轮换后的 token 对。
 const tokenSessionTTL = 365 * 24 * time.Hour
 
 // Service 渠道领域服务。
 type Service struct {
-	Channels     *storage.Channels
-	AuthSessions *storage.AuthSessions
-	Captchas     *storage.Captchas
-	MonitorLogs  *storage.MonitorLogs
-	Cipher       *crypto.Cipher
+	Channels       *storage.Channels
+	AuthSessions   *storage.AuthSessions
+	Captchas       *storage.Captchas
+	MonitorLogs    *storage.MonitorLogs
+	Cipher         *crypto.Cipher
+	tokenRefreshMu sync.Map // channel ID -> *sync.Mutex; serializes rotating refresh tokens
 }
 
 func NewService(
@@ -63,7 +66,8 @@ type NewAPITokenCredential struct {
 
 // Sub2APITokenCredential token 模式下 Sub2API 的凭据。
 type Sub2APITokenCredential struct {
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 // CreateInput 新建渠道使用的明文输入。
@@ -81,6 +85,7 @@ type CreateInput struct {
 	TokenCredential  string // JSON：password 模式时为空
 	TurnstileEnabled bool
 	CaptchaConfigID  *uint
+	Proxy            string
 	BalanceThreshold float64
 	MonitorEnabled   bool
 }
@@ -111,6 +116,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		CredentialMode:   mode,
 		TurnstileEnabled: in.TurnstileEnabled && mode == storage.CredentialModePassword, // token 模式不需要打码
 		CaptchaConfigID:  in.CaptchaConfigID,
+		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
 	}
@@ -134,11 +140,16 @@ type UpdateInput struct {
 	TokenCredential  *string // JSON
 	TurnstileEnabled *bool
 	CaptchaConfigID  *uint
+	Proxy            *string
 	BalanceThreshold *float64
 	MonitorEnabled   *bool
 }
 
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
+	lockValue, _ := s.tokenRefreshMu.LoadOrStore(id, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
 	c, err := s.Channels.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -218,6 +229,9 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	}
 	if in.MonitorEnabled != nil {
 		c.MonitorEnabled = *in.MonitorEnabled
+	}
+	if in.Proxy != nil {
+		c.Proxy = *in.Proxy
 	}
 	if err := s.Channels.Update(c); err != nil {
 		return nil, err
@@ -304,6 +318,7 @@ func (s *Service) Resolve(ctx context.Context, c *storage.Channel) (*connector.C
 		SiteURL:          c.SiteURL,
 		Username:         c.Username,
 		TurnstileEnabled: c.TurnstileEnabled,
+		Proxy:            c.Proxy,
 	}
 	if c.CredentialMode == storage.CredentialModeToken {
 		// token 模式：raw 是 JSON，Password 留空避免被 connector 误用
@@ -410,6 +425,9 @@ func (s *Service) EnsureSession(
 	conn connector.Connector,
 ) (*connector.AuthSession, error) {
 	if c.CredentialMode == storage.CredentialModeToken {
+		if c.Type == storage.ChannelTypeSub2API {
+			return s.ensureSub2APITokenSession(ctx, c, resolved, conn)
+		}
 		progress.Start(ctx, progress.StageSession, "使用用户提供的 token…")
 		session, err := s.buildSessionFromToken(c)
 		if err != nil {
@@ -447,6 +465,139 @@ func (s *Service) EnsureSession(
 		progress.OK(ctx, progress.StageSession, "会话已失效，重新登录")
 	}
 	return s.login(ctx, c, resolved, conn)
+}
+
+// ensureSub2APITokenSession checks a supplied access token and rotates its refresh token when needed.
+// The mutex prevents concurrent scans in this process from reusing a one-time refresh token.
+func (s *Service) ensureSub2APITokenSession(ctx context.Context, c *storage.Channel, resolved *connector.Channel, conn connector.Connector) (session *connector.AuthSession, resultErr error) {
+	progress.Start(ctx, progress.StageSession, "校验 Sub2API token，必要时自动续期…")
+	defer func() {
+		if resultErr != nil {
+			progress.Fail(ctx, progress.StageSession, resultErr.Error())
+		} else {
+			progress.OK(ctx, progress.StageSession, "Sub2API token 有效")
+		}
+	}()
+	lockValue, _ := s.tokenRefreshMu.LoadOrStore(c.ID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	latest, err := s.Channels.FindByID(c.ID)
+	if err != nil {
+		return nil, err
+	}
+	if latest.CredentialMode != storage.CredentialModeToken {
+		return nil, errors.New("channel credential mode changed")
+	}
+	if latest.Type != storage.ChannelTypeSub2API {
+		return nil, errors.New("channel type changed")
+	}
+	resolved.SiteURL = latest.SiteURL
+	resolved.Proxy = latest.Proxy
+	cred, err := s.readSub2APICredential(latest)
+	if err != nil {
+		return nil, err
+	}
+	session = &connector.AuthSession{AccessToken: cred.AccessToken, ExpiresAt: time.Now().Add(tokenSessionTTL)}
+	// JWT expiry is advisory; opaque tokens are checked through the upstream endpoint.
+	if cred.RefreshToken != "" && jwtExpiresSoon(cred.AccessToken, 5*time.Minute) {
+		return s.rotateSub2APIToken(ctx, latest, resolved, conn, cred)
+	}
+	if err := conn.CheckAuth(ctx, resolved, session); err != nil {
+		var status *connector.StatusError
+		if cred.RefreshToken != "" && errors.As(err, &status) && status.Code == 401 {
+			return s.rotateSub2APIToken(ctx, latest, resolved, conn, cred)
+		}
+		msg := "Sub2API token 校验失败：" + err.Error()
+		if errors.As(err, &status) && status.Code == 401 {
+			msg = "token 已失效且未配置 refresh token，请重新粘贴凭据：" + err.Error()
+		}
+		_ = s.Channels.SetLastError(c.ID, msg)
+		return nil, errors.New(msg)
+	}
+	_ = s.Channels.SetLastError(c.ID, "")
+	return session, nil
+}
+
+func (s *Service) readSub2APICredential(c *storage.Channel) (Sub2APITokenCredential, error) {
+	var cred Sub2APITokenCredential
+	raw, err := s.Cipher.Decrypt(c.PasswordCipher)
+	if err != nil {
+		return cred, err
+	}
+	if err := json.Unmarshal([]byte(raw), &cred); err != nil {
+		return cred, err
+	}
+	if cred.AccessToken == "" {
+		return cred, errors.New("missing sub2api access_token")
+	}
+	return cred, nil
+}
+
+func jwtExpiresSoon(token string, threshold time.Duration) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	data, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var payload struct {
+		Exp int64 `json:"exp"`
+	}
+	if json.Unmarshal(data, &payload) != nil || payload.Exp <= 0 {
+		return false
+	}
+	return time.Until(time.Unix(payload.Exp, 0)) <= threshold
+}
+
+func (s *Service) rotateSub2APIToken(ctx context.Context, c *storage.Channel, resolved *connector.Channel, conn connector.Connector, old Sub2APITokenCredential) (session *connector.AuthSession, resultErr error) {
+	started := time.Now()
+	defer func() {
+		if s.MonitorLogs != nil {
+			_ = s.MonitorLogs.Append(&storage.MonitorLog{
+				ChannelID: c.ID, Job: storage.MonitorJobRefresh, Success: resultErr == nil,
+				ErrorMessage: errString(resultErr), StartedAt: started, FinishedAt: time.Now(),
+			})
+		}
+	}()
+	refresher, ok := conn.(interface {
+		RefreshToken(context.Context, *connector.Channel, string) (string, string, time.Duration, error)
+	})
+	if !ok {
+		return nil, errors.New("sub2api connector does not support token refresh")
+	}
+	access, refresh, ttl, err := refresher.RefreshToken(ctx, resolved, old.RefreshToken)
+	if err != nil {
+		detail := strings.ReplaceAll(err.Error(), old.RefreshToken, "[redacted]")
+		detail = strings.ReplaceAll(detail, old.AccessToken, "[redacted]")
+		msg := "Sub2API 自动续期失败：" + detail
+		var status *connector.StatusError
+		if errors.As(err, &status) && (status.Code == 400 || status.Code == 401 || status.Code == 403) {
+			msg += "；请重新提供一组有效的 Access Token 和 Refresh Token"
+		}
+		_ = s.Channels.SetLastError(c.ID, msg)
+		return nil, errors.New(msg)
+	}
+	next, err := json.Marshal(Sub2APITokenCredential{AccessToken: access, RefreshToken: refresh})
+	if err != nil {
+		return nil, err
+	}
+	ciphertext, err := s.Cipher.Encrypt(string(next))
+	if err != nil {
+		return nil, err
+	}
+	updated, err := s.Channels.RotateTokenCredential(c.ID, c.PasswordCipher, ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return nil, errors.New("channel credentials changed during token refresh; retry with current credentials")
+	}
+	_ = s.Channels.SetLastError(c.ID, "")
+	return &connector.AuthSession{AccessToken: access, ExpiresAt: time.Now().Add(ttl)}, nil
 }
 
 func (s *Service) login(

@@ -6,14 +6,22 @@ import (
 	"strings"
 )
 
+type StatusError struct {
+	Code    int
+	Summary string
+}
+
+func (e *StatusError) Error() string {
+	if e.Summary == "" {
+		return fmt.Sprintf("status %d", e.Code)
+	}
+	return fmt.Sprintf("status %d: %s", e.Code, e.Summary)
+}
+
 const maxHTTPErrorSummaryRunes = 300
 
 func HTTPStatusError(statusCode int, body []byte) error {
-	summary := summarizeHTTPErrorBody(body)
-	if summary == "" {
-		return fmt.Errorf("status %d", statusCode)
-	}
-	return fmt.Errorf("status %d: %s", statusCode, summary)
+	return &StatusError{Code: statusCode, Summary: summarizeHTTPErrorBody(body)}
 }
 
 func summarizeHTTPErrorBody(body []byte) string {

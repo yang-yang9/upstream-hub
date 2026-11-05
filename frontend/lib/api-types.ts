@@ -22,7 +22,7 @@ export type CaptchaProviderType =
   | "anticaptcha"
   | "yescaptcha"
 
-export type MonitorJob = "login" | "balance" | "rates"
+export type MonitorJob = "login" | "refresh" | "balance" | "rates"
 
 export type NotificationEvent =
   | "balance_low"
@@ -40,6 +40,7 @@ export interface Channel {
   credential_mode: CredentialMode
   turnstile_enabled: boolean
   captcha_config_id?: number | null
+  proxy?: string
   balance_threshold: number
   monitor_enabled: boolean
   last_balance?: number | null

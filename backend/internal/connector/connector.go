@@ -33,6 +33,8 @@ type Channel struct {
 	Username         string
 	Password         string
 	TurnstileEnabled bool
+	// Proxy 该渠道专属的出站代理 URL（如 socks5://127.0.0.1:10808）；为空走直连。
+	Proxy string
 	// TurnstileToken 由调用方在 Login 前预先求解打码后填入；为空则直接发起登录。
 	TurnstileToken string
 }

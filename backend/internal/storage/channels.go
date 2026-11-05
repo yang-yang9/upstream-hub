@@ -9,9 +9,9 @@ type Channels struct{ db *gorm.DB }
 
 func NewChannels(db *gorm.DB) *Channels { return &Channels{db: db} }
 
-func (r *Channels) Create(c *Channel) error          { return r.db.Create(c).Error }
-func (r *Channels) Update(c *Channel) error          { return r.db.Save(c).Error }
-func (r *Channels) Delete(id uint) error             { return r.db.Delete(&Channel{}, id).Error }
+func (r *Channels) Create(c *Channel) error { return r.db.Create(c).Error }
+func (r *Channels) Update(c *Channel) error { return r.db.Save(c).Error }
+func (r *Channels) Delete(id uint) error    { return r.db.Delete(&Channel{}, id).Error }
 func (r *Channels) FindByID(id uint) (*Channel, error) {
 	var c Channel
 	if err := r.db.First(&c, id).Error; err != nil {
@@ -42,4 +42,11 @@ func (r *Channels) UpdateBalance(id uint, balance float64, at any, lastErr strin
 }
 func (r *Channels) SetLastError(id uint, msg string) error {
 	return r.db.Model(&Channel{}).Where("id = ?", id).Update("last_error", msg).Error
+}
+
+// RotateTokenCredential only replaces the credentials observed before refresh.
+// A concurrent manual edit must never be overwritten by a delayed response.
+func (r *Channels) RotateTokenCredential(id uint, previous, next string) (bool, error) {
+	result := r.db.Model(&Channel{}).Where("id = ? AND credential_mode = ? AND password_cipher = ? AND deleted_at IS NULL", id, CredentialModeToken, previous).Update("password_cipher", next)
+	return result.RowsAffected == 1, result.Error
 }

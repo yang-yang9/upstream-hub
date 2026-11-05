@@ -18,7 +18,8 @@ const (
 //   - password: 经典模式，存账号 + 密码，由 Connector 走完整登录流程
 //   - token:    跳过登录，存用户已有的 cookie / access_token，直接构造 AuthSession
 //
-// token 模式不依赖打码 / 不会自动续期，token 失效时表现为 last_error 显示鉴权失败。
+// token 模式不依赖打码；Sub2API 配置 refresh_token 后可自动轮换 token 对。
+// 其他只有 access_token 的渠道失效时在 last_error 显示鉴权失败。
 type CredentialMode string
 
 const (
@@ -47,6 +48,7 @@ type Channel struct {
 	CredentialMode   CredentialMode `gorm:"size:16;not null;default:'password'" json:"credential_mode"`
 	TurnstileEnabled bool           `gorm:"default:false" json:"turnstile_enabled"`
 	CaptchaConfigID  *uint          `json:"captcha_config_id,omitempty"`
+	Proxy            string         `gorm:"size:512" json:"proxy"`
 	BalanceThreshold float64        `gorm:"default:0" json:"balance_threshold"`
 	MonitorEnabled   bool           `gorm:"default:true" json:"monitor_enabled"`
 
@@ -224,6 +226,7 @@ type MonitorJob string
 
 const (
 	MonitorJobLogin   MonitorJob = "login"
+	MonitorJobRefresh MonitorJob = "refresh"
 	MonitorJobBalance MonitorJob = "balance"
 	MonitorJobRates   MonitorJob = "rates"
 )

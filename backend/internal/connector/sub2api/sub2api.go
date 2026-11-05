@@ -22,12 +22,59 @@ type Client struct {
 	http *resty.Client
 }
 
+// RefreshToken exchanges a Sub2API refresh token for a new, rotating token pair.
+func (c *Client) RefreshToken(ctx context.Context, ch *connector.Channel, refreshToken string) (string, string, time.Duration, error) {
+	resp, err := c.clientFor(ch).R().SetContext(ctx).SetHeader("Content-Type", "application/json").
+		SetBody(map[string]string{"refresh_token": refreshToken}).
+		Post(strings.TrimRight(ch.SiteURL, "/") + "/api/v1/auth/refresh")
+	if err != nil {
+		return "", "", 0, fmt.Errorf("sub2api refresh http: %w", err)
+	}
+	if resp.IsError() {
+		return "", "", 0, fmt.Errorf("sub2api refresh: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
+	}
+	var wrapped sub2Resp
+	if err := json.Unmarshal(resp.Body(), &wrapped); err != nil {
+		return "", "", 0, fmt.Errorf("sub2api refresh decode: %w", err)
+	}
+	if wrapped.Code != 0 {
+		return "", "", 0, fmt.Errorf("sub2api refresh: %s", wrapped.Message)
+	}
+	var data struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(wrapped.Data, &data); err != nil {
+		return "", "", 0, fmt.Errorf("sub2api refresh data: %w", err)
+	}
+	if data.AccessToken == "" || data.RefreshToken == "" || data.ExpiresIn <= 0 {
+		return "", "", 0, errors.New("sub2api refresh returned incomplete token pair")
+	}
+	return data.AccessToken, data.RefreshToken, time.Duration(data.ExpiresIn) * time.Second, nil
+}
+
 func New() *Client {
 	c := resty.New().
-		SetTimeout(30 * time.Second).
+		SetTransport(connector.NewHTTPTransport()).
+		SetTimeout(connector.RequestTimeout()).
 		SetHeader("User-Agent", "upstream-hub/0.1").
 		SetHeader("Accept", "application/json")
 	return &Client{http: c}
+}
+
+// clientFor 返回用于访问指定渠道的 resty 客户端。
+// 渠道配置了专属代理时新建一个走该代理的客户端；否则用共享的直连客户端。
+func (c *Client) clientFor(ch *connector.Channel) *resty.Client {
+	if ch.Proxy != "" {
+		return resty.New().
+			SetTransport(connector.NewHTTPTransport()).
+			SetTimeout(connector.RequestTimeout()).
+			SetHeader("User-Agent", "upstream-hub/0.1").
+			SetHeader("Accept", "application/json").
+			SetProxy(ch.Proxy)
+	}
+	return c.http
 }
 
 // sub2Resp sub2api 统一响应外壳：{ code, message, data }。code 0 = 成功。
@@ -38,7 +85,7 @@ type sub2Resp struct {
 }
 
 func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel) (string, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/settings/public", nil)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/settings/public", nil)
 	if err != nil {
 		return "", fmt.Errorf("sub2api public settings: %w", err)
 	}
@@ -65,7 +112,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 		body["turnstile_token"] = ch.TurnstileToken
 	}
 
-	resp, err := c.http.R().
+	resp, err := c.clientFor(ch).R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetBody(body).
@@ -113,12 +160,12 @@ func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *
 	if session == nil || session.AccessToken == "" {
 		return errors.New("missing sub2api access_token")
 	}
-	_, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
+	_, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
 	return err
 }
 
 func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) (*connector.BalanceResult, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
 	if err != nil {
 		return nil, fmt.Errorf("sub2api me: %w", err)
 	}
@@ -137,7 +184,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.RateResult, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
 
-	availBody, err := c.getJSON(ctx, site+"/api/v1/groups/available", session)
+	availBody, err := c.getJSON(ctx, ch, site+"/api/v1/groups/available", session)
 	if err != nil {
 		return nil, fmt.Errorf("sub2api groups available: %w", err)
 	}
@@ -152,7 +199,7 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	}
 
 	overrides := map[string]float64{}
-	if ratesBody, err := c.getJSON(ctx, site+"/api/v1/groups/rates", session); err == nil {
+	if ratesBody, err := c.getJSON(ctx, ch, site+"/api/v1/groups/rates", session); err == nil {
 		_ = json.Unmarshal(ratesBody, &overrides)
 	}
 
@@ -171,8 +218,8 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	return out, nil
 }
 
-func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
-	req := c.http.R().SetContext(ctx)
+func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	req := c.clientFor(ch).R().SetContext(ctx)
 	if session != nil && session.AccessToken != "" {
 		req.SetHeader("Authorization", "Bearer "+session.AccessToken)
 	}

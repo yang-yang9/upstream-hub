@@ -27,10 +27,25 @@ type Client struct {
 
 func New() *Client {
 	c := resty.New().
-		SetTimeout(30*time.Second).
+		SetTransport(connector.NewHTTPTransport()).
+		SetTimeout(connector.RequestTimeout()).
 		SetHeader("User-Agent", "upstream-hub/0.1").
 		SetHeader("Accept", "application/json")
 	return &Client{http: c}
+}
+
+// clientFor 返回用于访问指定渠道的 resty 客户端。
+// 渠道配置了专属代理时新建一个走该代理的客户端；否则用共享的直连客户端。
+func (c *Client) clientFor(ch *connector.Channel) *resty.Client {
+	if ch.Proxy != "" {
+		return resty.New().
+			SetTransport(connector.NewHTTPTransport()).
+			SetTimeout(connector.RequestTimeout()).
+			SetHeader("User-Agent", "upstream-hub/0.1").
+			SetHeader("Accept", "application/json").
+			SetProxy(ch.Proxy)
+	}
+	return c.http
 }
 
 // newapiResp NewAPI 统一响应外壳：{ success, message, data }。
@@ -41,7 +56,7 @@ type newapiResp struct {
 }
 
 func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel) (string, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/status", nil)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/status", nil)
 	if err != nil {
 		return "", fmt.Errorf("newapi status: %w", err)
 	}
@@ -60,7 +75,7 @@ func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel)
 
 func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.AuthSession, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
-	req := c.http.R().
+	req := c.clientFor(ch).R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetBody(map[string]string{
@@ -170,13 +185,13 @@ func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *
 	if session == nil || (session.Cookie == "" && session.AccessToken == "") {
 		return errors.New("missing newapi cookie or access token")
 	}
-	_, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self", session)
+	_, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self", session)
 	return err
 }
 
 func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) (*connector.BalanceResult, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
-	statusBody, err := c.getJSON(ctx, site+"/api/status", nil)
+	statusBody, err := c.getJSON(ctx, ch, site+"/api/status", nil)
 	if err != nil {
 		return nil, fmt.Errorf("newapi status: %w", err)
 	}
@@ -190,7 +205,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 		status.QuotaPerUnit = 500000
 	}
 
-	selfBody, err := c.getJSON(ctx, site+"/api/user/self", session)
+	selfBody, err := c.getJSON(ctx, ch, site+"/api/user/self", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi self: %w", err)
 	}
@@ -207,7 +222,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 }
 
 func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.RateResult, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi groups: %w", err)
 	}
@@ -235,8 +250,8 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	return out, nil
 }
 
-func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
-	req := c.http.R().SetContext(ctx)
+func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	req := c.clientFor(ch).R().SetContext(ctx)
 	if session != nil {
 		// token 鉴权 fork（new-api-das 等）登录返回 access_token，后续用 Bearer。
 		if session.AccessToken != "" {
