@@ -35,17 +35,21 @@ func New() *Client {
 }
 
 // clientFor 返回用于访问指定渠道的 resty 客户端。
-// 渠道配置了专属代理时新建一个走该代理的客户端；否则用共享的直连客户端。
-func (c *Client) clientFor(ch *connector.Channel) *resty.Client {
-	if ch.Proxy != "" {
-		return resty.New().
-			SetTransport(connector.NewHTTPTransport()).
-			SetTimeout(connector.RequestTimeout()).
-			SetHeader("User-Agent", "upstream-hub/0.1").
-			SetHeader("Accept", "application/json").
-			SetProxy(ch.Proxy)
+// 渠道配置了专属代理时返回走该代理的客户端——transport 按代理地址全局缓存
+// 复用连接池，避免每个请求都重新代理握手 + TLS；否则用共享的直连客户端。
+func (c *Client) clientFor(ch *connector.Channel) (*resty.Client, error) {
+	if ch.Proxy == "" {
+		return c.http, nil
 	}
-	return c.http
+	tr, err := connector.ProxyTransport(ch.Proxy)
+	if err != nil {
+		return nil, fmt.Errorf("newapi proxy: %w", err)
+	}
+	return resty.New().
+		SetTransport(tr).
+		SetTimeout(connector.RequestTimeout()).
+		SetHeader("User-Agent", "upstream-hub/0.1").
+		SetHeader("Accept", "application/json"), nil
 }
 
 // newapiResp NewAPI 统一响应外壳：{ success, message, data }。
@@ -75,7 +79,11 @@ func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel)
 
 func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.AuthSession, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
-	req := c.clientFor(ch).R().
+	client, err := c.clientFor(ch)
+	if err != nil {
+		return nil, err
+	}
+	req := client.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetBody(map[string]string{
@@ -251,7 +259,11 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 }
 
 func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
-	req := c.clientFor(ch).R().SetContext(ctx)
+	client, err := c.clientFor(ch)
+	if err != nil {
+		return nil, err
+	}
+	req := client.R().SetContext(ctx)
 	if session != nil {
 		// token 鉴权 fork（new-api-das 等）登录返回 access_token，后续用 Bearer。
 		if session.AccessToken != "" {

@@ -91,6 +91,9 @@ type CreateInput struct {
 }
 
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
+	if err := connector.ValidateProxyURL(in.Proxy); err != nil {
+		return nil, err
+	}
 	mode := in.CredentialMode
 	if mode == "" {
 		mode = storage.CredentialModePassword
@@ -148,7 +151,16 @@ type UpdateInput struct {
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	lockValue, _ := s.tokenRefreshMu.LoadOrStore(id, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
+	// 编辑与扫描的 token 自动续期共用这把锁（防止续期轮换出的凭据被旧值覆盖）。
+	// 续期期间锁最长被占 120s（HTTP 超时），编辑请求最多等 5s 后返回可重试错误，
+	// 避免 API 调用长时间挂住。
+	deadline := time.Now().Add(5 * time.Second)
+	for !lock.TryLock() {
+		if time.Now().After(deadline) {
+			return nil, errors.New("渠道正在执行 token 自动续期，请稍后重试")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	defer lock.Unlock()
 	c, err := s.Channels.FindByID(id)
 	if err != nil {
@@ -231,6 +243,9 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 		c.MonitorEnabled = *in.MonitorEnabled
 	}
 	if in.Proxy != nil {
+		if err := connector.ValidateProxyURL(*in.Proxy); err != nil {
+			return nil, err
+		}
 		c.Proxy = *in.Proxy
 	}
 	if err := s.Channels.Update(c); err != nil {
@@ -296,6 +311,8 @@ func validateCredential(channelType storage.ChannelType, mode storage.Credential
 
 func (s *Service) Delete(id uint) error {
 	_ = s.AuthSessions.Delete(id)
+	// 顺手清掉 per-channel 锁，避免长期运行下 sync.Map 累积已删渠道的 mutex。
+	s.tokenRefreshMu.Delete(id)
 	return s.Channels.Delete(id)
 }
 
@@ -557,9 +574,11 @@ func (s *Service) rotateSub2APIToken(ctx context.Context, c *storage.Channel, re
 	started := time.Now()
 	defer func() {
 		if s.MonitorLogs != nil {
+			finished := time.Now()
 			_ = s.MonitorLogs.Append(&storage.MonitorLog{
 				ChannelID: c.ID, Job: storage.MonitorJobRefresh, Success: resultErr == nil,
-				ErrorMessage: errString(resultErr), StartedAt: started, FinishedAt: time.Now(),
+				ErrorMessage: errString(resultErr), StartedAt: started, FinishedAt: finished,
+				DurationMS: finished.Sub(started).Milliseconds(),
 			})
 		}
 	}()
@@ -620,6 +639,7 @@ func (s *Service) login(
 		ErrorMessage: errString(err),
 		StartedAt:    started,
 		FinishedAt:   finished,
+		DurationMS:   finished.Sub(started).Milliseconds(),
 	})
 	if err != nil {
 		progress.Fail(ctx, progress.StageLogin, err.Error())
