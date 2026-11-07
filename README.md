@@ -22,6 +22,7 @@
 - Telegram、Webhook、邮件、企业微信、钉钉、飞书、Bark 通知
 
 > 完整部署、环境变量、升级、打码、通知、排障说明见 **[docs/deployment.md](docs/deployment.md)**。
+> 能力现状与缺失规划见 **[docs/roadmap.md](docs/roadmap.md)**。
 
 ## 启动方式
 
