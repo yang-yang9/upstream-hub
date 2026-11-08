@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/worryzyy/upstream-hub/internal/storage"
 )
@@ -339,4 +340,24 @@ func TestFailureTrackerOnSuccess(t *testing.T) {
 			t.Errorf("body %q should contain streak count 1", m.Body)
 		}
 	})
+}
+
+// 对应 spec：docs/specs/quiet-hours-cooldown.md AC-5。
+// 失败告警与恢复消息同样携带渠道的冷却覆盖（Dispatcher 据此判定）。
+func TestFailureMessagesCarryCooldown(t *testing.T) {
+	c := storage.Channel{
+		ID:              7,
+		Name:            "alpha",
+		NotifyCooldowns: `{"login_failed":5}`,
+	}
+	tr := NewFailureTracker(newFakeStreakStore(), 1, nil)
+
+	// 阈值 1：第一次失败即告警。
+	m := tr.OnFailure(c, storage.MonitorJobLogin, errors.New("boom"))
+	if m == nil {
+		t.Fatal("OnFailure = nil, want 告警消息")
+	}
+	if got := m.Cooldown[storage.EventLoginFailed]; got != 5*time.Minute {
+		t.Errorf("失败消息 Cooldown[login_failed] = %v, want 5m", got)
+	}
 }

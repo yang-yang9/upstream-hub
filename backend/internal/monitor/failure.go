@@ -68,6 +68,8 @@ func (t *FailureTracker) OnSuccess(c storage.Channel, job storage.MonitorJob) *n
 		ChannelID: c.ID,
 		Subject:   fmt.Sprintf("[upstream-hub] %s 已恢复（%s）", c.Name, jobLabel(job)),
 		Body:      fmt.Sprintf("此前连续失败 %d 次", s.Count),
+		// 恢复事件不参与冷却，但照常携带覆盖（Dispatcher 对非冷却事件忽略它）。
+		Cooldown: cooldownOverrides(&c),
 	}
 }
 
@@ -83,6 +85,7 @@ func failureMessage(c storage.Channel, job storage.MonitorJob, err error, count 
 		ChannelID: c.ID,
 		Subject:   fmt.Sprintf("[upstream-hub] %s %s失败", c.Name, jobLabel(job)),
 		Body:      body,
+		Cooldown:  cooldownOverrides(&c),
 	}
 }
 

@@ -55,6 +55,13 @@ type Channel struct {
 	// 前端表单总是显式携带该字段（UI 默认值在前端给），API 省略字段则如实落 false。
 	MonitorEnabled bool `gorm:"default:false" json:"monitor_enabled"`
 
+	// NotifyCooldowns per-channel 冷却覆盖（P1-6）：JSON 对象，键限 4 类参与冷却的
+	// 事件（balance_low / balance_forecast_low / login_failed / monitor_failed），
+	// 值 = 分钟（0 = 显式关闭该事件的冷却）。空串 / "{}" = 不覆盖，跟随全局 Policy。
+	// 校验在 API 层（notify.ParseCooldownOverrides，非法 → 400）；monitor 构造消息时
+	// fail-open 解析填入 Message.Cooldown，脏数据回退全局。
+	NotifyCooldowns string `gorm:"type:text" json:"notify_cooldowns"`
+
 	// 最近一次采集结果（聚合视图，便于列表页直接展示）
 	LastBalance   *float64   `json:"last_balance,omitempty"`
 	LastBalanceAt *time.Time `json:"last_balance_at,omitempty"`

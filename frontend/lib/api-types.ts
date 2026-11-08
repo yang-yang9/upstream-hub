@@ -46,6 +46,8 @@ export interface Channel {
   proxy?: string
   balance_threshold: number
   monitor_enabled: boolean
+  /** per-channel 冷却覆盖 JSON（P1-6）：{"balance_low":10,...}，空 = 跟随全局 */
+  notify_cooldowns?: string
   last_balance?: number | null
   last_balance_at?: string | null
   last_error?: string

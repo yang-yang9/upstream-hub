@@ -33,6 +33,7 @@
 - 8 类事件：`balance_low` / `balance_forecast_low` / `rate_changed` / `login_failed` / `captcha_failed` / `monitor_failed` / `login_recovered` / `monitor_recovered`
 - 通知渠道配置 AES-GCM 加密落库
 - 去抖：balance_low / balance_forecast_low 双事件独立冷却（PostgreSQL 持久化、跨重启）、同批倍率变化合并推送、MinChangePct 涨跌幅过滤（低于阈值仍写库、不推送）
+- 静默时段（默认关闭，窗口内全静默、不占冷却名额）+ per-channel 冷却覆盖（渠道表单按 4 类事件覆盖全局冷却，0 = 不冷却）
 - 失败风暴防护：连续 N 次失败才告警（按 job 维度计数，`failure_streaks` 表持久化）+ 失败事件冷却 + 成功后"已恢复"通知
 - 按通知渠道的订阅过滤（关心哪些上游 / 分组）、指数退避重试、发送日志、测试发送
 
@@ -65,7 +66,7 @@
 |---|------|------|
 | 4 | ~~失败风暴防刷屏~~（已完成，spec 见 [specs/failure-recovery.md](specs/failure-recovery.md)） | 失败事件冷却 + "连续 N 次失败才告警"（按 job 维度计数）+ 恢复通知（`login_recovered` / `monitor_recovered`） |
 | 5 | 通知渠道自身健康 | 发送失败只写 `notification_logs`。Telegram token 失效这类问题需要兜底机制（如备用通知渠道）被发现 |
-| 6 | 静默时段 / 每事件独立冷却 | 无 quiet hours；`BalanceLowCooldown` 全局一份，缺 per-event / per-channel 粒度 |
+| 6 | ~~静默时段 / 每事件独立冷却~~（已完成，spec 见 [specs/quiet-hours-cooldown.md](specs/quiet-hours-cooldown.md)） | 无 quiet hours；`BalanceLowCooldown` 全局一份，缺 per-event / per-channel 粒度。落地为：静默时段（默认关闭）+ 渠道级 4 事件冷却覆盖 |
 | 7 | 日报 / 周报 digest | 余额、倍率变动、失败汇总的定时摘要。通知框架已就绪，只差一个 cron 任务 |
 
 ### P2 · 监控维度扩展
@@ -95,7 +96,7 @@
 
 ```
 P0-1 消耗预测（✅ 已完成） → P1-4 失败冷却/恢复（✅ 已完成） → P0-2 跨渠道比价（✅ 已完成）
-    → P3-15 /metrics（✅ 已完成） → 其余按需
+    → P3-15 /metrics（✅ 已完成） → P1-6 静默时段/渠道级冷却（✅ 已完成） → 其余按需
 ```
 
 理由：P0 三项纯逻辑补齐、不新增数据依赖，性价比最高；P1-4 防刷屏是告警可靠性的前提；`/metrics` 打通已有可观测体系。

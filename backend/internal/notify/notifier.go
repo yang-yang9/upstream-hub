@@ -25,6 +25,11 @@ type Message struct {
 	Subject   string
 	Body      string
 	Extra     map[string]any
+
+	// Cooldown 来源上游渠道的 per-channel 冷却覆盖（P1-6），由 monitor 构造消息时
+	// 从 Channel.NotifyCooldowns 解析填入。nil / 键不存在 = 跟随全局 Policy；
+	// 键存在（含 0）= 替代全局值，0 表示该事件不冷却。
+	Cooldown CooldownOverrides
 }
 
 // Notifier 通知渠道抽象。

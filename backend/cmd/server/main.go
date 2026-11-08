@@ -95,12 +95,18 @@ func main() {
 	failures := storage.NewFailures(db)
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, monLogs, cipher)
+	quiet, err := notify.ParseQuietHours(cfg.Notifications.QuietHours)
+	if err != nil {
+		log.Error("解析静默时段配置失败", "err", err)
+		os.Exit(1)
+	}
 	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
 		BatchRateChanges:   cfg.Notifications.BatchRateChanges,
 		MinChangePct:       cfg.Notifications.MinChangePct,
 		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
 		ForecastCooldown:   time.Duration(cfg.Forecast.CooldownMinutes) * time.Minute,
 		FailureCooldown:    time.Duration(cfg.Notifications.FailureCooldownMinutes) * time.Minute,
+		QuietHours:         quiet,
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log, monitor.ForecastConfig{

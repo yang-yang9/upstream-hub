@@ -205,15 +205,17 @@ func fakeChannel(t *testing.T, cipher *crypto.Cipher, id uint, name string, fail
 
 // fakeCooldown 可编排的冷却存储。
 type fakeCooldown struct {
-	ok     bool
-	err    error
-	calls  int
-	events []storage.NotificationEvent // 每次实际 claim 的事件，供断言事件→冷却映射
+	ok        bool
+	err       error
+	calls     int
+	events    []storage.NotificationEvent // 每次实际 claim 的事件，供断言事件→冷却映射
+	durations []time.Duration             // 每次实际 claim 的冷却时长（断言覆盖值）
 }
 
 func (f *fakeCooldown) TryClaimCooldown(channelID uint, event storage.NotificationEvent, cooldown time.Duration) (bool, error) {
 	f.calls++
 	f.events = append(f.events, event)
+	f.durations = append(f.durations, cooldown)
 	return f.ok, f.err
 }
 
@@ -276,13 +278,13 @@ func TestDispatchSuppress(t *testing.T) {
 	balMsg := Message{Event: storage.EventBalanceLow, ChannelID: 1, Subject: "s", Body: "b"}
 
 	for _, tc := range []struct {
-		name        string
-		msg         Message
-		cooldown    time.Duration
-		claimOK     bool
-		claimErr    error
-		wantSent    int
-		wantClaims  int
+		name       string
+		msg        Message
+		cooldown   time.Duration
+		claimOK    bool
+		claimErr   error
+		wantSent   int
+		wantClaims int
 	}{
 		{"claim ok sends", balMsg, time.Minute, true, nil, 1, 1},
 		{"claim false suppresses", balMsg, time.Minute, false, nil, 0, 1},
@@ -574,5 +576,174 @@ func TestDispatchSuppressFailureEvents(t *testing.T) {
 		if cd.calls != tc.wantClaims {
 			t.Errorf("%s: cooldown claims = %d, want %d", tc.name, cd.calls, tc.wantClaims)
 		}
+	}
+}
+
+// ---------- P1-6：静默时段 + per-channel 冷却覆盖 ----------
+// 对应 spec：docs/specs/quiet-hours-cooldown.md AC-3 / AC-5。
+
+// atLocal 构造服务器本地时区的固定时刻（测试不依赖真实时钟）。
+func atLocal(h, m, s int) time.Time {
+	return time.Date(2026, 1, 1, h, m, s, 0, time.Local)
+}
+
+// TestDispatchQuietHoursSuppressed 窗口内：不查通知渠道、不发送、不写发送日志。
+func TestDispatchQuietHoursSuppressed(t *testing.T) {
+	qh, err := ParseQuietHours("00:00-23:59")
+	if err != nil {
+		t.Fatalf("ParseQuietHours: %v", err)
+	}
+	state := &fakeState{}
+	registerFake(t, state)
+	store := &fakeStore{channels: []storage.NotificationChannel{
+		fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+	}}
+	cd := &fakeCooldown{ok: true}
+	d := newFakeDispatcher(t, store, cd, Policy{BalanceLowCooldown: time.Hour, QuietHours: qh})
+	d.now = func() time.Time { return atLocal(12, 0, 0) }
+
+	if err := d.Dispatch(context.Background(), Message{Event: storage.EventBalanceLow, ChannelID: 1, Subject: "s", Body: "b"}); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if store.listCalls != 0 {
+		t.Errorf("ListEnabledChannels calls = %d, want 0（静默期内不查通知渠道）", store.listCalls)
+	}
+	if cd.calls != 0 {
+		t.Errorf("cooldown claims = %d, want 0（静默期不占冷却名额）", cd.calls)
+	}
+	if got := len(state.sent()); got != 0 {
+		t.Errorf("sends = %d, want 0", got)
+	}
+	if got := len(store.logs); got != 0 {
+		t.Errorf("send logs = %d, want 0", got)
+	}
+}
+
+// TestDispatchQuietHoursDoesNotClaimCooldown 静默期触发不 claim；
+// 出窗后条件仍成立的第一次触发照常发送（冷却从出窗后起算）。
+func TestDispatchQuietHoursDoesNotClaimCooldown(t *testing.T) {
+	qh, err := ParseQuietHours("23:00-08:00")
+	if err != nil {
+		t.Fatalf("ParseQuietHours: %v", err)
+	}
+	state := &fakeState{}
+	registerFake(t, state)
+	store := &fakeStore{channels: []storage.NotificationChannel{
+		fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+	}}
+	cd := &fakeCooldown{ok: true}
+	d := newFakeDispatcher(t, store, cd, Policy{BalanceLowCooldown: time.Hour, QuietHours: qh})
+	msg := Message{Event: storage.EventBalanceLow, ChannelID: 1, Subject: "s", Body: "b"}
+
+	// 23:30 窗口内：静默。
+	d.now = func() time.Time { return atLocal(23, 30, 0) }
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("Dispatch in window: %v", err)
+	}
+	if cd.calls != 0 || store.listCalls != 0 || len(state.sent()) != 0 {
+		t.Fatalf("窗口内产生了副作用：claims=%d list=%d sends=%d, want 全 0", cd.calls, store.listCalls, len(state.sent()))
+	}
+
+	// 12:00 出窗：发送且首次 claim。
+	d.now = func() time.Time { return atLocal(12, 0, 0) }
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("Dispatch out of window: %v", err)
+	}
+	if got := len(state.sent()); got != 1 {
+		t.Errorf("出窗后 sends = %d, want 1", got)
+	}
+	if cd.calls != 1 {
+		t.Errorf("出窗后 cooldown claims = %d, want 1", cd.calls)
+	}
+}
+
+// TestDispatchRateBatchQuietHours 倍率批量推送同样受静默时段约束（不查渠道不发）。
+func TestDispatchRateBatchQuietHours(t *testing.T) {
+	qh, err := ParseQuietHours("00:00-23:59")
+	if err != nil {
+		t.Fatalf("ParseQuietHours: %v", err)
+	}
+	state := &fakeState{}
+	registerFake(t, state)
+	store := &fakeStore{channels: []storage.NotificationChannel{
+		fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+	}}
+	cd := &fakeCooldown{ok: true}
+	d := newFakeDispatcher(t, store, cd, Policy{QuietHours: qh})
+	d.now = func() time.Time { return atLocal(12, 0, 0) }
+
+	changes := []RateChange{{GroupName: "gpt-4o", OldRatio: 1, NewRatio: 2, ChangedAt: time.Now()}}
+	if err := d.DispatchRateBatch(context.Background(), &storage.Channel{ID: 1, Name: "alpha"}, changes); err != nil {
+		t.Fatalf("DispatchRateBatch: %v", err)
+	}
+	if store.listCalls != 0 {
+		t.Errorf("ListEnabledChannels calls = %d, want 0", store.listCalls)
+	}
+	if got := len(state.sent()); got != 0 {
+		t.Errorf("sends = %d, want 0", got)
+	}
+}
+
+// TestDispatchCooldownOverride 覆盖值替代全局冷却时长（10min vs 全局 60min）。
+func TestDispatchCooldownOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		override    CooldownOverrides
+		wantDur     time.Duration
+		wantClaimed bool
+	}{
+		{"override wins", CooldownOverrides{storage.EventBalanceLow: 10 * time.Minute}, 10 * time.Minute, true},
+		{"no override uses global", nil, 60 * time.Minute, true},
+		{"other event override ignored", CooldownOverrides{storage.EventLoginFailed: 5 * time.Minute}, 60 * time.Minute, true},
+	} {
+		state := &fakeState{}
+		registerFake(t, state)
+		store := &fakeStore{channels: []storage.NotificationChannel{
+			fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+		}}
+		cd := &fakeCooldown{ok: true}
+		d := newFakeDispatcher(t, store, cd, Policy{BalanceLowCooldown: 60 * time.Minute})
+		msg := Message{Event: storage.EventBalanceLow, ChannelID: 1, Subject: "s", Body: "b", Cooldown: tc.override}
+		if err := d.Dispatch(context.Background(), msg); err != nil {
+			t.Fatalf("%s: Dispatch: %v", tc.name, err)
+		}
+		if len(cd.durations) != 1 {
+			t.Errorf("%s: claims = %d, want 1", tc.name, len(cd.durations))
+			continue
+		}
+		if cd.durations[0] != tc.wantDur {
+			t.Errorf("%s: claimed cooldown = %v, want %v", tc.name, cd.durations[0], tc.wantDur)
+		}
+	}
+}
+
+// TestDispatchCooldownOverrideZeroDisables 覆盖值 0 = 该渠道该事件不冷却：
+// 即便冷却存储说"还在窗口内"（claim 返回 false），也照样发送。
+func TestDispatchCooldownOverrideZeroDisables(t *testing.T) {
+	state := &fakeState{}
+	registerFake(t, state)
+	store := &fakeStore{channels: []storage.NotificationChannel{
+		fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+	}}
+	// ok=false 模拟"冷却未过"；覆盖 0 应让 suppress 短路、根本不问冷却存储。
+	cd := &fakeCooldown{ok: false}
+	d := newFakeDispatcher(t, store, cd, Policy{FailureCooldown: 60 * time.Minute})
+	msg := Message{
+		Event:     storage.EventLoginFailed,
+		ChannelID: 1,
+		Subject:   "s",
+		Body:      "b",
+		Cooldown:  CooldownOverrides{storage.EventLoginFailed: 0},
+	}
+	for i := 0; i < 2; i++ {
+		if err := d.Dispatch(context.Background(), msg); err != nil {
+			t.Fatalf("第 %d 次 Dispatch: %v", i+1, err)
+		}
+	}
+	if got := len(state.sent()); got != 2 {
+		t.Errorf("sends = %d, want 2（0 = 不冷却，每次都发）", got)
+	}
+	if cd.calls != 0 {
+		t.Errorf("cooldown claims = %d, want 0（覆盖 0 时短路，不查冷却存储）", cd.calls)
 	}
 }

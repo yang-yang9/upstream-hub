@@ -88,6 +88,10 @@ type CreateInput struct {
 	Proxy            string
 	BalanceThreshold float64
 	MonitorEnabled   bool
+
+	// NotifyCooldowns per-channel 冷却覆盖 JSON（P1-6）。已由 API 层
+	// notify.ParseCooldownOverrides 校验合法性；空串 = 不覆盖。
+	NotifyCooldowns string
 }
 
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
@@ -122,6 +126,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
+		NotifyCooldowns:  in.NotifyCooldowns,
 	}
 	if mode == storage.CredentialModeToken {
 		// token 模式不依赖打码 provider
@@ -146,6 +151,10 @@ type UpdateInput struct {
 	Proxy            *string
 	BalanceThreshold *float64
 	MonitorEnabled   *bool
+
+	// NotifyCooldowns per-channel 冷却覆盖 JSON（P1-6）。非 nil 即整体替换
+	//（空串 = 清空覆盖）；nil = 不修改。已由 API 层校验合法性。
+	NotifyCooldowns *string
 }
 
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
@@ -247,6 +256,9 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 			return nil, err
 		}
 		c.Proxy = *in.Proxy
+	}
+	if in.NotifyCooldowns != nil {
+		c.NotifyCooldowns = *in.NotifyCooldowns
 	}
 	if err := s.Channels.Update(c); err != nil {
 		return nil, err

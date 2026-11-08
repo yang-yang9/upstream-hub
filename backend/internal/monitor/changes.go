@@ -47,6 +47,16 @@ func rateChangeDiff(
 	}, true
 }
 
+// cooldownOverrides fail-open 解析渠道的 per-channel 冷却覆盖（P1-6）。
+// 脏数据（历史遗留 / 手改库）按无覆盖处理，回落全局 Policy，不因它丢告警。
+func cooldownOverrides(c *storage.Channel) notify.CooldownOverrides {
+	ov, err := notify.ParseCooldownOverrides(c.NotifyCooldowns)
+	if err != nil {
+		return nil
+	}
+	return ov
+}
+
 // balanceLowMessage 判断余额是否低于渠道阈值并构造告警消息。
 // 阈值 <= 0（未配置）或余额 >= 阈值（严格小于语义）时不触发。
 func balanceLowMessage(c *storage.Channel, balance float64) (notify.Message, bool) {
@@ -58,5 +68,6 @@ func balanceLowMessage(c *storage.Channel, balance float64) (notify.Message, boo
 		ChannelID: c.ID,
 		Subject:   fmt.Sprintf("[upstream-hub] %s 余额低于阈值", c.Name),
 		Body:      fmt.Sprintf("当前余额: %.4f，阈值: %.4f", balance, c.BalanceThreshold),
+		Cooldown:  cooldownOverrides(c),
 	}, true
 }

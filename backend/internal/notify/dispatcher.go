@@ -27,6 +27,9 @@ type Dispatcher struct {
 	log      *slog.Logger
 	policy   Policy
 	cooldown CooldownStore
+
+	// now 当前时刻（静默时段判定用）。生产取 time.Now；同包测试注入固定时刻。
+	now func() time.Time
 }
 
 // NewDispatcher 用 *storage.Notifications 作为 CooldownStore 的具体实现，
@@ -52,6 +55,7 @@ func NewDispatcherWithStore(store NotifierStore, cipher *crypto.Cipher, log *slo
 		log:      log,
 		policy:   policy,
 		cooldown: cooldown,
+		now:      time.Now,
 	}
 }
 
@@ -81,14 +85,30 @@ func (d *Dispatcher) Send(ctx context.Context, ch *storage.NotificationChannel, 
 // 订阅过滤：渠道配置 Subscriptions 非空时，必须有任意一条订阅命中 msg 才发送；
 // 空订阅列表（""/null/[]）视为"订阅一切"，向后兼容已有通知渠道。
 //
+// 静默时段（P1-6）：窗口内全部事件不推送、不占冷却名额（冷却窗口从出窗后
+// 的首次触发起算），也不查通知渠道。测试发送走 Send，不受影响。
+//
 // 去抖：balance_low / balance_forecast_low / login_failed / monitor_failed 同渠道
 // 在各自冷却窗口内不重复推送，状态在 PostgreSQL 里持久化。
+// per-channel 冷却覆盖（msg.Cooldown）：键存在即替代全局时长，0 = 不冷却。
 // 失败：按 SendMaxAttempts 进行指数退避重试。
 func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
+	if d.quiet() {
+		if d.log != nil {
+			d.log.Debug("notification suppressed by quiet hours",
+				"event", msg.Event, "channel_id", msg.ChannelID)
+		}
+		return nil
+	}
 	if d.suppress(msg) {
 		return nil
 	}
 	return d.fanout(ctx, msg, nil)
+}
+
+// quiet 当前时刻是否处于静默时段（未配置 = false）。
+func (d *Dispatcher) quiet() bool {
+	return d.policy.QuietHours.InWindow(d.now())
 }
 
 // DispatchRateBatch 把一次扫描收集到的多条 RateChange 按 Policy 合并 / 过滤后推送。
@@ -100,6 +120,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
 // 关键：合并消息只包含订阅匹配的子集，避免"全合并后 ModelName='' 被 groups 模式订阅过滤掉"的边界。
 func (d *Dispatcher) DispatchRateBatch(ctx context.Context, channel *storage.Channel, changes []RateChange) error {
 	if channel == nil || len(changes) == 0 {
+		return nil
+	}
+	// 静默时段同样覆盖倍率批量推送（P1-6）：不出门、不查渠道。
+	if d.quiet() {
+		if d.log != nil {
+			d.log.Debug("rate batch suppressed by quiet hours", "channel_id", channel.ID)
+		}
 		return nil
 	}
 	filtered := make([]RateChange, 0, len(changes))
@@ -172,6 +199,8 @@ func subsetForSubscriptions(upstreamID uint, changes []RateChange, subs []Subscr
 // suppress 判断是否要按 cooldown 跳过本次发送。
 // 只对带独立冷却配置的事件生效（balance_low / balance_forecast_low /
 // login_failed / monitor_failed，见 cooldownForEvent）。
+// per-channel 覆盖（msg.Cooldown）在全局值之后判定：键存在即替代全局时长，
+// 0 短路（不查冷却存储，每次都发）；其他事件的覆盖键不影响本事件。
 func (d *Dispatcher) suppress(msg Message) bool {
 	cooldown, eligible := cooldownForEvent(d.policy, msg.Event)
 	if !eligible {
@@ -179,6 +208,9 @@ func (d *Dispatcher) suppress(msg Message) bool {
 	}
 	if msg.ChannelID == 0 {
 		return false
+	}
+	if dur, ok := msg.Cooldown[msg.Event]; ok {
+		cooldown = dur
 	}
 	if cooldown <= 0 {
 		return false

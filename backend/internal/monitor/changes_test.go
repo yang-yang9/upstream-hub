@@ -104,3 +104,48 @@ func TestBalanceLowMessage(t *testing.T) {
 		}
 	}
 }
+
+// 对应 spec：docs/specs/quiet-hours-cooldown.md AC-5。
+// 消息构造点把渠道的 notify_cooldowns 解析后随 Message 携带进 Dispatcher；
+// 非法 JSON（绕过 API 校验写入的脏数据）fail-open：空覆盖、告警照发。
+func TestBalanceLowMessageCarriesCooldown(t *testing.T) {
+	ch := &storage.Channel{
+		ID:               9,
+		Name:             "alpha",
+		BalanceThreshold: 2,
+		NotifyCooldowns:  `{"balance_low":10,"monitor_failed":5}`,
+	}
+	msg, ok := balanceLowMessage(ch, 1)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	want := notify.CooldownOverrides{
+		storage.EventBalanceLow:     10 * time.Minute,
+		storage.EventMonitorFailed:  5 * time.Minute,
+	}
+	if len(msg.Cooldown) != len(want) {
+		t.Fatalf("msg.Cooldown = %v, want %v", msg.Cooldown, want)
+	}
+	for ev, d := range want {
+		if msg.Cooldown[ev] != d {
+			t.Errorf("msg.Cooldown[%v] = %v, want %v", ev, msg.Cooldown[ev], d)
+		}
+	}
+
+	// 未配置 → 空覆盖。
+	ch.NotifyCooldowns = ""
+	msg, _ = balanceLowMessage(ch, 1)
+	if len(msg.Cooldown) != 0 {
+		t.Errorf("未配置时 msg.Cooldown = %v, want 空", msg.Cooldown)
+	}
+
+	// 非法 JSON → fail-open 空覆盖，消息仍构造。
+	ch.NotifyCooldowns = "not json"
+	msg, ok = balanceLowMessage(ch, 1)
+	if !ok {
+		t.Fatal("非法 JSON 时 ok = false, want true（fail-open）")
+	}
+	if len(msg.Cooldown) != 0 {
+		t.Errorf("非法 JSON 时 msg.Cooldown = %v, want 空（回落全局）", msg.Cooldown)
+	}
+}

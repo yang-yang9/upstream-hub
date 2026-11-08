@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/worryzyy/upstream-hub/internal/channel"
+	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/progress"
 	"github.com/worryzyy/upstream-hub/internal/storage"
 )
@@ -45,6 +46,7 @@ type channelInput struct {
 	Proxy            string                 `json:"proxy"`
 	BalanceThreshold float64                `json:"balance_threshold"`
 	MonitorEnabled   bool                   `json:"monitor_enabled"`
+	NotifyCooldowns  string                 `json:"notify_cooldowns"`
 }
 
 type channelUpdateInput struct {
@@ -59,6 +61,7 @@ type channelUpdateInput struct {
 	Proxy            *string                 `json:"proxy"`
 	BalanceThreshold *float64                `json:"balance_threshold"`
 	MonitorEnabled   *bool                   `json:"monitor_enabled"`
+	NotifyCooldowns  *string                 `json:"notify_cooldowns"`
 }
 
 func listChannels(c *gin.Context, d *Deps) {
@@ -76,6 +79,12 @@ func createChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
+	// 冷却覆盖合法性在 API 层拦（非法 JSON / 未知键 / 负数 → 400），
+	// service 只管落库。对应 spec：quiet-hours-cooldown.md AC-4。
+	if _, err := notify.ParseCooldownOverrides(in.NotifyCooldowns); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	created, err := d.ChannelSvc.Create(channel.CreateInput{
 		Name:             in.Name,
 		Type:             in.Type,
@@ -89,6 +98,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
+		NotifyCooldowns:  in.NotifyCooldowns,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -122,6 +132,12 @@ func updateChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
+	if in.NotifyCooldowns != nil {
+		if _, err := notify.ParseCooldownOverrides(*in.NotifyCooldowns); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+	}
 	updated, err := d.ChannelSvc.Update(id, channel.UpdateInput{
 		Name:             in.Name,
 		SiteURL:          in.SiteURL,
@@ -134,6 +150,7 @@ func updateChannel(c *gin.Context, d *Deps) {
 		Proxy:            in.Proxy,
 		BalanceThreshold: in.BalanceThreshold,
 		MonitorEnabled:   in.MonitorEnabled,
+		NotifyCooldowns:  in.NotifyCooldowns,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)

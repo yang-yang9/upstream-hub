@@ -29,6 +29,12 @@ import {
 } from "@/components/ui/popover"
 import type { Channel, ChannelType, CredentialMode } from "@/lib/api-types"
 import { apiFetch } from "@/lib/api"
+import {
+  buildNotifyCooldowns,
+  COOLDOWN_EVENT_LABELS,
+  parseNotifyCooldowns,
+  type CooldownFormValues,
+} from "@/lib/notify-cooldowns"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useCaptchaConfigs } from "@/lib/queries"
 import { cn } from "@/lib/utils"
@@ -68,6 +74,21 @@ interface FormState {
   turnstile_enabled: boolean
   captcha_config_id: string // "" 表示不绑定
   proxy: string
+  // per-channel 冷却覆盖（P1-6）：值为字符串形式的分钟数，"" = 跟随全局
+  cooldowns: CooldownFormValues
+}
+
+/** 从渠道的 notify_cooldowns JSON 回填表单（坏数据按空处理）。 */
+function initialCooldowns(c?: Channel | null): CooldownFormValues {
+  const parsed = parseNotifyCooldowns(c?.notify_cooldowns)
+  const str = (k: keyof CooldownFormValues) =>
+    parsed[k] != null ? String(parsed[k]) : ""
+  return {
+    balance_low: str("balance_low"),
+    balance_forecast_low: str("balance_forecast_low"),
+    login_failed: str("login_failed"),
+    monitor_failed: str("monitor_failed"),
+  }
 }
 
 function initialState(c?: Channel | null): FormState {
@@ -88,6 +109,7 @@ function initialState(c?: Channel | null): FormState {
     turnstile_enabled: c?.turnstile_enabled ?? false,
     captcha_config_id: c?.captcha_config_id != null ? String(c.captcha_config_id) : "",
     proxy: c?.proxy ?? "",
+    cooldowns: initialCooldowns(c),
   }
 }
 
@@ -197,6 +219,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           turnstile_enabled: !isTokenMode && form.turnstile_enabled,
           captcha_config_id: captchaConfigID,
           proxy: form.proxy.trim(),
+          notify_cooldowns: buildNotifyCooldowns(form.cooldowns),
         }
         if (!isTokenMode && form.password) body.password = form.password
         if (isTokenMode && tokenCredential) body.token_credential = tokenCredential
@@ -220,6 +243,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
             turnstile_enabled: !isTokenMode && form.turnstile_enabled,
             captcha_config_id: captchaConfigID,
             proxy: form.proxy.trim(),
+            notify_cooldowns: buildNotifyCooldowns(form.cooldowns),
           }),
         })
       }
@@ -490,6 +514,35 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
               onChange={(e) => setForm({ ...form, balance_threshold: e.target.value })}
               disabled={submitting}
             />
+          </div>
+
+          {/* per-channel 冷却覆盖（P1-6）：留空跟随全局 */}
+          <div className="space-y-1.5">
+            <Label>通知冷却覆盖（分钟）</Label>
+            <div className="grid grid-cols-2 gap-3">
+              {(Object.keys(COOLDOWN_EVENT_LABELS) as (keyof CooldownFormValues)[]).map((key) => (
+                <div key={key} className="space-y-1.5">
+                  <Label htmlFor={`cooldown-${key}`} className="text-xs">
+                    {COOLDOWN_EVENT_LABELS[key]}
+                  </Label>
+                  <Input
+                    id={`cooldown-${key}`}
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="跟随全局"
+                    value={form.cooldowns[key]}
+                    onChange={(e) =>
+                      setForm({ ...form, cooldowns: { ...form.cooldowns, [key]: e.target.value } })
+                    }
+                    disabled={submitting}
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              该渠道各类事件的独立冷却分钟数：0 = 不冷却（每次都发），留空 = 使用全局配置。
+            </p>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">

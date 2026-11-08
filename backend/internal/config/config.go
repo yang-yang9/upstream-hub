@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/storage"
 )
 
@@ -115,6 +116,8 @@ type RetentionConfig struct {
 //     计数按 job 维度（登录 / 余额 / 倍率），持久化在 failure_streaks 表。
 //   - FailureCooldownMinutes：login_failed / monitor_failed 同渠道在 X 分钟内不重复推送
 //     （失败风暴节流；窗口过后重发起"还在异常"提醒）。0 = 不冷却。
+//   - QuietHours：静默时段 "HH:MM-HH:MM"（P1-6），窗口内全部通知不推送、不占冷却名额。
+//     空串（默认）= 关闭，即 7×24 照发。非法格式在 Load 时报错（fail-fast）。
 //   - SendMaxAttempts：单条通知发送失败时最多尝试次数（含首次）。
 //     1 = 不重试。重试采用指数退避：1s / 2s / 4s …，上限 30s。
 type NotificationsConfig struct {
@@ -123,6 +126,7 @@ type NotificationsConfig struct {
 	BalanceLowCooldownMinutes int     `mapstructure:"balanceLowCooldownMinutes"`
 	FailureThreshold          int     `mapstructure:"failureThreshold"`
 	FailureCooldownMinutes    int     `mapstructure:"failureCooldownMinutes"`
+	QuietHours                string  `mapstructure:"quietHours"`
 	SendMaxAttempts           int     `mapstructure:"sendMaxAttempts"`
 }
 
@@ -192,6 +196,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("forecast.cooldownMinutes", "UPSTREAMHUB_FORECAST_COOLDOWN_MINUTES")
 	_ = v.BindEnv("notifications.failureThreshold", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_THRESHOLD")
 	_ = v.BindEnv("notifications.failureCooldownMinutes", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_COOLDOWN_MINUTES")
+	_ = v.BindEnv("notifications.quietHours", "UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS")
 	_ = v.BindEnv("server.metricsToken", "UPSTREAMHUB_METRICS_TOKEN")
 
 	if err := v.ReadInConfig(); err != nil {
@@ -203,6 +208,10 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+	// 静默时段格式 fail-fast：非法配置拒绝启动，而不是带病跑成 7×24。
+	if _, err := notify.ParseQuietHours(cfg.Notifications.QuietHours); err != nil {
+		return nil, fmt.Errorf("invalid notifications.quietHours: %w", err)
 	}
 	return cfg, nil
 }

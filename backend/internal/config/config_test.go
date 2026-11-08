@@ -58,3 +58,30 @@ func TestMetricsTokenFromEnv(t *testing.T) {
 		t.Errorf("MetricsToken from env = %q, want %q", cfg.Server.MetricsToken, "secret")
 	}
 }
+
+// 对应 spec：docs/specs/quiet-hours-cooldown.md AC-1 / AC-2。
+// quietHours 默认空 = 静默关闭；env 覆盖生效（camelCase key 需显式 BindEnv）；
+// 非法格式在 config.Load 就报错（拒绝启动）。
+func TestQuietHoursConfig(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Notifications.QuietHours != "" {
+		t.Errorf("default QuietHours = %q, want 空（静默关闭）", cfg.Notifications.QuietHours)
+	}
+
+	t.Setenv("UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS", "23:00-08:00")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Notifications.QuietHours != "23:00-08:00" {
+		t.Errorf("QuietHours from env = %q, want %q", cfg.Notifications.QuietHours, "23:00-08:00")
+	}
+
+	t.Setenv("UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS", "25:00-06:00")
+	if _, err := Load(""); err == nil {
+		t.Error("Load with 25:00-06:00 = nil error, want 拒绝启动")
+	}
+}

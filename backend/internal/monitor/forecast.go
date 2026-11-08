@@ -110,5 +110,6 @@ func balanceForecastMessage(c *storage.Channel, f BurnForecast, alertDays int) (
 		Subject:   subject,
 		Body: fmt.Sprintf("当前余额: %.4f，日均消耗: %.4f，预计耗尽时间: %s",
 			f.Latest, f.DailyBurn, f.DepletedAt.UTC().Format("2006-01-02")),
+		Cooldown: cooldownOverrides(c),
 	}, true
 }
