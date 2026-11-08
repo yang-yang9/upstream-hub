@@ -11,9 +11,18 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/storage"
 )
 
+// NotifierStore 是 Dispatcher 依赖的持久化窄接口（读通知渠道 + 写发送日志）。
+// *storage.Notifications 天然满足；测试用 fake 实现替代真 PostgreSQL。
+type NotifierStore interface {
+	ListEnabledChannels() ([]storage.NotificationChannel, error)
+	AppendLog(l *storage.NotificationLog) error
+}
+
+var _ NotifierStore = (*storage.Notifications)(nil)
+
 // Dispatcher 把单条事件 fan-out 到所有启用的通知渠道，并按 Policy 做去抖。
 type Dispatcher struct {
-	repo     *storage.Notifications
+	repo     NotifierStore
 	cipher   *crypto.Cipher
 	log      *slog.Logger
 	policy   Policy
@@ -29,11 +38,16 @@ func NewDispatcher(repo *storage.Notifications, cipher *crypto.Cipher, log *slog
 }
 
 func NewDispatcherWithCooldown(repo *storage.Notifications, cipher *crypto.Cipher, log *slog.Logger, policy Policy, cooldown CooldownStore) *Dispatcher {
+	return NewDispatcherWithStore(repo, cipher, log, policy, cooldown)
+}
+
+// NewDispatcherWithStore 允许注入任意 NotifierStore（单测用 fake）。
+func NewDispatcherWithStore(store NotifierStore, cipher *crypto.Cipher, log *slog.Logger, policy Policy, cooldown CooldownStore) *Dispatcher {
 	if policy.SendMaxAttempts <= 0 {
 		policy.SendMaxAttempts = 1
 	}
 	return &Dispatcher{
-		repo:     repo,
+		repo:     store,
 		cipher:   cipher,
 		log:      log,
 		policy:   policy,

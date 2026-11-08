@@ -33,6 +33,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.turbo/
+frontend/coverage/
 
 # Embedded frontend dist — 仓库里只保留 .gitkeep 占位，
 # 真实 dist 在 docker build 阶段由 frontend-builder 填充。

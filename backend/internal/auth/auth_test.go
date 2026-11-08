@@ -224,6 +224,27 @@ func TestMiddlewareRejectsExpiredToken(t *testing.T) {
 	}
 }
 
+// 特征测试：钉住 Verify 对畸形输入的拒绝路径（签名错误路径由
+// TestRenewSetsIatOnLegacyToken 里 s2.Verify 的跨密钥用例覆盖）。
+// 对应 spec：docs/specs/auth-session-token.md。
+func TestVerifyRejectsMalformedToken(t *testing.T) {
+	s := newTestService(t, time.Hour, 24*time.Hour)
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{"empty token", ""},
+		{"no separator", "abc"},
+		{"too many parts", "a.b.c"},
+		{"payload not base64", "!!!.AAAA"},
+		{"sig not base64", "AAAA.!!!"},
+	} {
+		if _, _, err := s.Verify(tc.token); err == nil {
+			t.Errorf("%s: Verify(%q) should fail", tc.name, tc.token)
+		}
+	}
+}
+
 func (s *Service) mustSign(t *testing.T, c claims) string {
 	t.Helper()
 	tok, err := s.sign(c)

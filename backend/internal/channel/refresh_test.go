@@ -6,21 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/worryzyy/upstream-hub/internal/config"
 	"github.com/worryzyy/upstream-hub/internal/connector"
 	"github.com/worryzyy/upstream-hub/internal/connector/sub2api"
 	"github.com/worryzyy/upstream-hub/internal/crypto"
 	"github.com/worryzyy/upstream-hub/internal/storage"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"github.com/worryzyy/upstream-hub/internal/storage/storagetest"
 )
 
 func TestJWTExpiryAdvisory(t *testing.T) {
@@ -38,32 +34,12 @@ func TestJWTExpiryAdvisory(t *testing.T) {
 	}
 }
 
-// Opt-in integration test. All mutations are restricted to a transaction-local
-// temporary table; production channel rows are never queried or modified.
+// Opt-in integration test（UPSTREAMHUB_TEST_DB=1 门控，详见 docs/development.md）。
+// 跑在 storagetest 分配的独立测试库上，生产库的表不受影响。
 func TestSub2APIRefreshPersistence(t *testing.T) {
-	if os.Getenv("UPSTREAMHUB_TEST_REFRESH_DB") != "1" {
-		t.Skip("set UPSTREAMHUB_TEST_REFRESH_DB=1 with database environment")
-	}
-	cfg, err := config.Load("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := gorm.Open(postgres.Open(cfg.Database.ToStorageConfig().DSN()), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatal("open test connection failed")
-	}
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-	tx := db.Begin()
-	if tx.Error != nil {
-		t.Fatal(tx.Error)
-	}
-	defer tx.Rollback()
-	if err := tx.Exec("CREATE TEMP TABLE channels (LIKE public.channels INCLUDING DEFAULTS) ON COMMIT DROP").Error; err != nil {
-		t.Fatal(err)
-	}
+	db := storagetest.Open(t)
 	cipher, _ := crypto.NewCipher("test-only-key")
-	repo := storage.NewChannels(tx)
+	repo := storage.NewChannels(db)
 	service := NewService(repo, nil, nil, nil, cipher)
 	for _, tc := range []struct {
 		name      string
@@ -99,7 +75,7 @@ func TestSub2APIRefreshPersistence(t *testing.T) {
 			}
 			encrypted, _ := cipher.Encrypt(raw)
 			row := &storage.Channel{ID: 1, Name: "test", Type: storage.ChannelTypeSub2API, SiteURL: server.URL, CredentialMode: storage.CredentialModeToken, PasswordCipher: encrypted}
-			if err := tx.Exec("DELETE FROM pg_temp.channels").Error; err != nil {
+			if err := db.Exec("TRUNCATE channels RESTART IDENTITY CASCADE").Error; err != nil {
 				t.Fatal(err)
 			}
 			if err := repo.Create(row); err != nil {

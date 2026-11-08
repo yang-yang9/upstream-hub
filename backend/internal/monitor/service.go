@@ -113,14 +113,8 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f", res.Balance),
 		map[string]any{"balance": res.Balance})
 
-	if c.BalanceThreshold > 0 && res.Balance < c.BalanceThreshold {
-		body := fmt.Sprintf("当前余额: %.4f，阈值: %.4f", res.Balance, c.BalanceThreshold)
-		_ = s.dispatcher.Dispatch(ctx, notify.Message{
-			Event:     storage.EventBalanceLow,
-			ChannelID: c.ID,
-			Subject:   fmt.Sprintf("[upstream-hub] %s 余额低于阈值", c.Name),
-			Body:      body,
-		})
+	if msg, ok := balanceLowMessage(c, res.Balance); ok {
+		_ = s.dispatcher.Dispatch(ctx, msg)
 	}
 	return nil
 }
@@ -166,31 +160,12 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 			s.log.Warn("rate upsert failed", "channel", c.Name, "model", r.ModelName, "err", err)
 			continue
 		}
-		if prev == nil {
+		log, change, changed := rateChangeDiff(c, r.ModelName, prev, r.Ratio, r.CompletionRatio, now)
+		if !changed {
 			continue
 		}
-		if prev.Ratio == r.Ratio && prev.CompletionRatio == r.CompletionRatio {
-			continue
-		}
-		oldRatio := prev.Ratio
-		oldComp := prev.CompletionRatio
-		_ = s.rates.AppendChange(&storage.RateChangeLog{
-			ChannelID:          c.ID,
-			ModelName:          r.ModelName,
-			OldRatio:           &oldRatio,
-			NewRatio:           r.Ratio,
-			OldCompletionRatio: &oldComp,
-			NewCompletionRatio: r.CompletionRatio,
-			ChangedAt:          now,
-		})
-		changes = append(changes, notify.RateChange{
-			GroupName: r.ModelName,
-			OldRatio:  oldRatio,
-			NewRatio:  r.Ratio,
-			OldComp:   oldComp,
-			NewComp:   r.CompletionRatio,
-			ChangedAt: now,
-		})
+		_ = s.rates.AppendChange(log)
+		changes = append(changes, change)
 	}
 	// 一次扫描的所有变化打包推送：去抖策略（合并 / 涨跌幅过滤）由 Dispatcher.Policy 决定。
 	if len(changes) > 0 {

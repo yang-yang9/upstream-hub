@@ -1,7 +1,8 @@
 name: CI
 
-# 提交到 dev 或提 PR 时跑编译/类型/lint/单测，快速挡住低级错误。
-# publish.yml 的 Docker 构建慢（十几分钟），这里 3-4 分钟先出结果。
+# 提交到 dev 或提 PR 时跑编译/类型/lint/单测/集成测试，快速挡住低级错误。
+# publish.yml 的 Docker 构建慢（十几分钟），这里先出结果。
+# 集成测试连 postgres service（真 PostgreSQL，非 SQLite）；覆盖率只输出不设门槛。
 on:
   push:
     branches:
@@ -15,11 +16,30 @@ permissions:
 
 jobs:
   backend:
-    name: Backend (go vet / build / test)
+    name: Backend (go vet / build / test + integration)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: uh
+          POSTGRES_PASSWORD: uh
+          POSTGRES_DB: uh_test
+        ports:
+          - 5432:5432
+        # 给 healthcheck 用的凭据也走 env，避免硬编码。
+        options: >-
+          --health-cmd "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # 集成测试门控：storagetest harness 会按包建独立库（uh_test_<pkg>），互不踩踏。
+      UPSTREAMHUB_TEST_DB: "1"
+      UPSTREAMHUB_TEST_DATABASE_DSN: "host=127.0.0.1 port=5432 user=uh password=uh dbname=uh_test sslmode=disable TimeZone=UTC"
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +54,21 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test
-        run: go test ./...
+      - name: go test (含 PostgreSQL 集成)
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+
+      - name: 覆盖率摘要
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: 上传后端覆盖率
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+          if-no-files-found: error
 
   frontend:
-    name: Frontend (typecheck / lint / build)
+    name: Frontend (typecheck / lint / build / test)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,3 +89,13 @@ jobs:
 
       - name: build
         run: pnpm build
+
+      - name: test (vitest + coverage)
+        run: pnpm test:coverage
+
+      - name: 上传前端覆盖率
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          if-no-files-found: error

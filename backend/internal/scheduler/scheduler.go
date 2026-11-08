@@ -92,36 +92,27 @@ func (s *Scheduler) hasRetention() bool {
 
 // runRetention 按配置删除过期历史。任一表失败不影响其它，全部错误写日志。
 func (s *Scheduler) runRetention() {
-	r := s.cfg.Retention
-	now := time.Now()
-
-	if r.MonitorLogsDays > 0 {
-		cutoff := now.AddDate(0, 0, -r.MonitorLogsDays)
-		n, err := s.monLogs.DeleteBefore(cutoff)
-		if err != nil {
-			s.log.Warn("retention monitor_logs failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("retention monitor_logs deleted", "rows", n, "before", cutoff)
-		}
+	for _, task := range planRetention(s.cfg.Retention, time.Now()) {
+		s.runRetentionTask(task)
 	}
+}
 
-	if r.BalanceSnapshotsDays > 0 {
-		cutoff := now.AddDate(0, 0, -r.BalanceSnapshotsDays)
-		n, err := s.rates.DeleteBalanceSnapshotsBefore(cutoff)
-		if err != nil {
-			s.log.Warn("retention balance_snapshots failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("retention balance_snapshots deleted", "rows", n, "before", cutoff)
-		}
+// runRetentionTask 执行单张表的清理任务，失败只写日志。
+func (s *Scheduler) runRetentionTask(task retentionTask) {
+	var n int64
+	var err error
+	switch task.kind {
+	case retentionMonitorLogs:
+		n, err = s.monLogs.DeleteBefore(task.cutoff)
+	case retentionBalanceSnapshots:
+		n, err = s.rates.DeleteBalanceSnapshotsBefore(task.cutoff)
+	default:
+		n, err = s.notifies.DeleteLogsBefore(task.cutoff)
 	}
-
-	if r.NotificationLogsDays > 0 {
-		cutoff := now.AddDate(0, 0, -r.NotificationLogsDays)
-		n, err := s.notifies.DeleteLogsBefore(cutoff)
-		if err != nil {
-			s.log.Warn("retention notification_logs failed", "err", err)
-		} else if n > 0 {
-			s.log.Info("retention notification_logs deleted", "rows", n, "before", cutoff)
-		}
+	table := task.kind.table()
+	if err != nil {
+		s.log.Warn("retention "+table+" failed", "err", err)
+	} else if n > 0 {
+		s.log.Info("retention "+table+" deleted", "rows", n, "before", task.cutoff)
 	}
 }
