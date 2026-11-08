@@ -21,8 +21,9 @@ func TestMonitorLogsAppendDefaults(t *testing.T) {
 		t.Errorf("defaults not filled: %+v", l)
 	}
 
-	// 显式时间与耗时保留。
-	start := time.Now().UTC().Truncate(time.Microsecond)
+	// 显式时间与耗时保留：种子取过去时刻（1 小前），List 按 started_at 倒序时
+	// 晚采集的自动填时间日志（channel 1）排在前。
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	finish := start.Add(150 * time.Millisecond)
 	if err := m.Append(&storage.MonitorLog{
 		ChannelID: 2, Job: storage.MonitorJobRates, Success: false,
@@ -35,7 +36,7 @@ func TestMonitorLogsAppendDefaults(t *testing.T) {
 	if err != nil || len(logs) != 2 {
 		t.Fatalf("List = %v, %v", logs, err)
 	}
-	// 倒序：自动填时间的新日志在前。
+	// 倒序：晚采集的自动填时间日志在前。
 	if logs[0].ChannelID != 1 || logs[1].ChannelID != 2 {
 		t.Errorf("List order = %v then %v, want newest first", logs[0].ChannelID, logs[1].ChannelID)
 	}

@@ -50,7 +50,10 @@ type Channel struct {
 	CaptchaConfigID  *uint          `json:"captcha_config_id,omitempty"`
 	Proxy            string         `gorm:"size:512" json:"proxy"`
 	BalanceThreshold float64        `gorm:"default:0" json:"balance_threshold"`
-	MonitorEnabled   bool           `gorm:"default:true" json:"monitor_enabled"`
+	// default 必须 false：gorm 对带 default 标签的零值 bool 在 INSERT 时省略该列，
+	// 若 default:true，显式传 false 的渠道会被静默写成 true（"关不掉"bug）。
+	// 前端表单总是显式携带该字段（UI 默认值在前端给），API 省略字段则如实落 false。
+	MonitorEnabled bool `gorm:"default:false" json:"monitor_enabled"`
 
 	// 最近一次采集结果（聚合视图，便于列表页直接展示）
 	LastBalance   *float64   `json:"last_balance,omitempty"`
@@ -97,7 +100,8 @@ type CaptchaConfig struct {
 	APIKeyCipher string              `gorm:"size:1024" json:"-"`
 	Endpoint     string              `gorm:"size:512" json:"endpoint,omitempty"`
 	Extra        string              `gorm:"type:text" json:"extra,omitempty"`
-	Enabled      bool                `gorm:"default:true" json:"enabled"`
+	// 同 Channel.MonitorEnabled：default:false 保证显式 false 如实落库。
+	Enabled bool `gorm:"default:false" json:"enabled"`
 	CreatedAt    time.Time           `json:"created_at"`
 	UpdatedAt    time.Time           `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt      `gorm:"index" json:"-"`
@@ -168,7 +172,8 @@ type NotificationChannel struct {
 	Type          NotificationChannelType `gorm:"size:32;not null;index" json:"type"`
 	ConfigCipher  string                  `gorm:"type:text;not null" json:"-"`
 	Subscriptions string                  `gorm:"type:text;not null;default:'[]'" json:"subscriptions"`
-	Enabled       bool                    `gorm:"default:true" json:"enabled"`
+	// 同 Channel.MonitorEnabled：default:false 保证显式 false 如实落库。
+	Enabled bool `gorm:"default:false" json:"enabled"`
 	CreatedAt     time.Time               `json:"created_at"`
 	UpdatedAt     time.Time               `json:"updated_at"`
 	DeletedAt     gorm.DeletedAt          `gorm:"index" json:"-"`

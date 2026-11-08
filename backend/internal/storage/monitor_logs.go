@@ -11,11 +11,14 @@ type MonitorLogs struct{ db *gorm.DB }
 func NewMonitorLogs(db *gorm.DB) *MonitorLogs { return &MonitorLogs{db: db} }
 
 func (r *MonitorLogs) Append(l *MonitorLog) error {
+	// 同一个 now 填两个零值：两次 time.Now() 若跨毫秒边界，
+	// 自动算出的 DurationMS 会偶发为 1。
+	now := time.Now()
 	if l.StartedAt.IsZero() {
-		l.StartedAt = time.Now()
+		l.StartedAt = now
 	}
 	if l.FinishedAt.IsZero() {
-		l.FinishedAt = time.Now()
+		l.FinishedAt = now
 	}
 	if l.DurationMS == 0 {
 		l.DurationMS = l.FinishedAt.Sub(l.StartedAt).Milliseconds()

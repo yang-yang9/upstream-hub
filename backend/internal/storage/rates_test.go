@@ -144,11 +144,14 @@ func TestRatesBalanceHistoryAndRetention(t *testing.T) {
 
 // bucketExpected 在 Go 里复算 date_trunc + 每 (channel, bucket) 取最后一条 + 按 bucket 求和，
 // 与 AggregateBalanceTrend / Hourly 的 SQL 语义一致，作为期望值。
-func bucketExpected(t *testing.T, seeds []storage.BalanceSnapshot, trunc time.Duration) map[time.Time]float64 {
+// 键用 RFC3339 字符串而不是 time.Time：pgx 扫回的 date_trunc 结果与 Go Truncate 的
+// 结果即时刻相同，但 Location 指针不同（time.Time == 逐字段比较 loc 指针），
+// 直接做 map 键会全部 miss。
+func bucketExpected(t *testing.T, seeds []storage.BalanceSnapshot, trunc time.Duration) map[string]float64 {
 	t.Helper()
-	last := map[time.Time]map[uint]storage.BalanceSnapshot{}
+	last := map[string]map[uint]storage.BalanceSnapshot{}
 	for _, s := range seeds {
-		b := s.SampledAt.Truncate(trunc)
+		b := s.SampledAt.Truncate(trunc).Format(time.RFC3339)
 		if last[b] == nil {
 			last[b] = map[uint]storage.BalanceSnapshot{}
 		}
@@ -156,7 +159,7 @@ func bucketExpected(t *testing.T, seeds []storage.BalanceSnapshot, trunc time.Du
 			last[b][s.ChannelID] = s
 		}
 	}
-	out := map[time.Time]float64{}
+	out := map[string]float64{}
 	for b, chans := range last {
 		sum := 0.0
 		for _, s := range chans {
@@ -197,7 +200,7 @@ func TestAggregateBalanceTrendDaily(t *testing.T) {
 		t.Fatalf("trend rows = %d, want %d (%+v)", len(got), len(want), got)
 	}
 	for _, row := range got {
-		b := row.Day
+		b := row.Day.Format(time.RFC3339)
 		if w, ok := want[b]; !ok || row.Balance != w {
 			t.Errorf("day %v balance = %v, want %v", b, row.Balance, want[b])
 		}
@@ -232,7 +235,7 @@ func TestAggregateBalanceTrendHourly(t *testing.T) {
 		t.Fatalf("hourly rows = %d, want %d (%+v)", len(got), len(want), got)
 	}
 	for _, row := range got {
-		b := row.Day
+		b := row.Day.Format(time.RFC3339)
 		if w, ok := want[b]; !ok || row.Balance != w {
 			t.Errorf("hour %v balance = %v, want %v", b, row.Balance, want[b])
 		}
