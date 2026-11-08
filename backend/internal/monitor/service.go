@@ -23,6 +23,7 @@ type Service struct {
 	dispatcher  *notify.Dispatcher
 	log         *slog.Logger
 	forecast    ForecastConfig
+	failures    *FailureTracker
 }
 
 func NewService(
@@ -33,6 +34,7 @@ func NewService(
 	dispatcher *notify.Dispatcher,
 	log *slog.Logger,
 	forecast ForecastConfig,
+	failures *FailureTracker,
 ) *Service {
 	return &Service{
 		channels:    channels,
@@ -42,6 +44,7 @@ func NewService(
 		dispatcher:  dispatcher,
 		log:         log,
 		forecast:    forecast,
+		failures:    failures,
 	}
 }
 
@@ -76,12 +79,16 @@ func (s *Service) ScanAllRates(ctx context.Context) {
 }
 
 // RefreshBalance 单个渠道余额刷新，可被 API 手动触发。
+// 失败 / 恢复通知走 FailureTracker（连续 N 次才告警 + 恢复通知，
+// 对应 spec：docs/specs/failure-recovery.md）。
 func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error {
 	resolved, conn, session, err := s.prepare(ctx, c)
 	if err != nil {
-		s.notifyError(ctx, c, storage.EventLoginFailed, "登录失败", err)
+		s.notifyFailure(ctx, c, storage.MonitorJobLogin, err)
 		return err
 	}
+	// prepare 成功（登录 / 会话正常）即 login job 的恢复点（spec AC-4）。
+	s.notifyRecovery(ctx, c, storage.MonitorJobLogin)
 
 	progress.Start(ctx, progress.StageBalance, "拉取余额…")
 	started := time.Now()
@@ -97,7 +104,7 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	})
 	if err != nil {
 		progress.Fail(ctx, progress.StageBalance, err.Error())
-		s.notifyError(ctx, c, storage.EventMonitorFailed, "余额采集失败", err)
+		s.notifyFailure(ctx, c, storage.MonitorJobBalance, err)
 		return err
 	}
 
@@ -116,6 +123,7 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f", res.Balance),
 		map[string]any{"balance": res.Balance})
 
+	s.notifyRecovery(ctx, c, storage.MonitorJobBalance)
 	if msg, ok := balanceLowMessage(c, res.Balance); ok {
 		_ = s.dispatcher.Dispatch(ctx, msg)
 	}
@@ -163,12 +171,16 @@ func (s *Service) dispatchForecast(ctx context.Context, c *storage.Channel) {
 }
 
 // RefreshRates 单个渠道倍率刷新，可被 API 手动触发。
+// 失败 / 恢复通知走 FailureTracker（连续 N 次才告警 + 恢复通知，
+// 对应 spec：docs/specs/failure-recovery.md）。
 func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	resolved, conn, session, err := s.prepare(ctx, c)
 	if err != nil {
-		s.notifyError(ctx, c, storage.EventLoginFailed, "登录失败", err)
+		s.notifyFailure(ctx, c, storage.MonitorJobLogin, err)
 		return err
 	}
+	// prepare 成功即 login job 的恢复点（spec AC-4）。
+	s.notifyRecovery(ctx, c, storage.MonitorJobLogin)
 
 	progress.Start(ctx, progress.StageRates, "拉取分组倍率…")
 	started := time.Now()
@@ -184,7 +196,7 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	})
 	if err != nil {
 		progress.Fail(ctx, progress.StageRates, err.Error())
-		s.notifyError(ctx, c, storage.EventMonitorFailed, "倍率采集失败", err)
+		s.notifyFailure(ctx, c, storage.MonitorJobRates, err)
 		return err
 	}
 
@@ -216,6 +228,7 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	}
 	progress.OK(ctx, progress.StageRates, fmt.Sprintf("拉到 %d 个分组", len(results)),
 		map[string]any{"count": len(results)})
+	s.notifyRecovery(ctx, c, storage.MonitorJobRates)
 	return nil
 }
 
@@ -235,13 +248,23 @@ func (s *Service) prepare(ctx context.Context, c *storage.Channel) (*connector.C
 	return resolved, conn, session, nil
 }
 
-func (s *Service) notifyError(ctx context.Context, c *storage.Channel, event storage.NotificationEvent, subject string, err error) {
-	_ = s.dispatcher.Dispatch(ctx, notify.Message{
-		Event:     event,
-		ChannelID: c.ID,
-		Subject:   fmt.Sprintf("[upstream-hub] %s %s", c.Name, subject),
-		Body:      err.Error(),
-	})
+// notifyFailure 失败路径：记录连续失败计数，达阈值才派发告警（spec AC-3）。
+// streak 存储出错时 tracker fail-open 照发；重发节流由 Dispatcher 的失败冷却负责。
+func (s *Service) notifyFailure(ctx context.Context, c *storage.Channel, job storage.MonitorJob, err error) {
+	if m := s.failures.OnFailure(*c, job, err); m != nil {
+		if derr := s.dispatcher.Dispatch(ctx, *m); derr != nil {
+			s.log.Warn("dispatch failure notification failed", "channel", c.Name, "err", derr)
+		}
+	}
+}
+
+// notifyRecovery 成功路径：取走 streak，计数曾达阈值才派发恢复通知（spec AC-4）。
+func (s *Service) notifyRecovery(ctx context.Context, c *storage.Channel, job storage.MonitorJob) {
+	if m := s.failures.OnSuccess(*c, job); m != nil {
+		if derr := s.dispatcher.Dispatch(ctx, *m); derr != nil {
+			s.log.Warn("dispatch recovery notification failed", "channel", c.Name, "err", derr)
+		}
+	}
 }
 
 func errString(err error) string {

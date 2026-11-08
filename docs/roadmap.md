@@ -30,9 +30,10 @@
 ### 1.3 通知层（`backend/internal/notify`）
 
 - 7 种通知渠道：Telegram / Webhook / Email(SMTP) / 企业微信 / 钉钉 / 飞书 / Bark
-- 6 类事件：`balance_low` / `balance_forecast_low` / `rate_changed` / `login_failed` / `captcha_failed` / `monitor_failed`
+- 8 类事件：`balance_low` / `balance_forecast_low` / `rate_changed` / `login_failed` / `captcha_failed` / `monitor_failed` / `login_recovered` / `monitor_recovered`
 - 通知渠道配置 AES-GCM 加密落库
 - 去抖：balance_low / balance_forecast_low 双事件独立冷却（PostgreSQL 持久化、跨重启）、同批倍率变化合并推送、MinChangePct 涨跌幅过滤（低于阈值仍写库、不推送）
+- 失败风暴防护：连续 N 次失败才告警（按 job 维度计数，`failure_streaks` 表持久化）+ 失败事件冷却 + 成功后"已恢复"通知
 - 按通知渠道的订阅过滤（关心哪些上游 / 分组）、指数退避重试、发送日志、测试发送
 
 ### 1.4 展示与运维
@@ -61,7 +62,7 @@
 
 | # | 能力 | 说明 |
 |---|------|------|
-| 4 | 失败风暴防刷屏 | cooldown 只对 `balance_low` 生效（`notify/dispatcher.go` 的 `suppress`），`monitor_failed` / `login_failed` 无冷却——站点挂掉后每轮扫描每个渠道都会推一遍。需要：失败类事件冷却 + "连续 N 次失败才告警"的持续性判断 + 恢复通知 |
+| 4 | ~~失败风暴防刷屏~~（已完成，spec 见 [specs/failure-recovery.md](specs/failure-recovery.md)） | 失败事件冷却 + "连续 N 次失败才告警"（按 job 维度计数）+ 恢复通知（`login_recovered` / `monitor_recovered`） |
 | 5 | 通知渠道自身健康 | 发送失败只写 `notification_logs`。Telegram token 失效这类问题需要兜底机制（如备用通知渠道）被发现 |
 | 6 | 静默时段 / 每事件独立冷却 | 无 quiet hours；`BalanceLowCooldown` 全局一份，缺 per-event / per-channel 粒度 |
 | 7 | 日报 / 周报 digest | 余额、倍率变动、失败汇总的定时摘要。通知框架已就绪，只差一个 cron 任务 |
@@ -92,7 +93,7 @@
 ## 三、建议实施顺序
 
 ```
-P0-1 消耗预测（✅ 已完成） → P1-4 失败冷却/恢复 → P0-2 跨渠道比价
+P0-1 消耗预测（✅ 已完成） → P1-4 失败冷却/恢复（✅ 已完成） → P0-2 跨渠道比价
     → P2-8 API key Connector → P3-15 /metrics → 其余按需
 ```
 

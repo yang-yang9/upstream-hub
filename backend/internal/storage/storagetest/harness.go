@@ -56,6 +56,7 @@ var allTables = []string{
 	"notification_logs",
 	"notification_cooldowns",
 	"monitor_logs",
+	"failure_streaks",
 }
 
 // Open 打开调用方包专属的测试数据库（未设 UPSTREAMHUB_TEST_DB=1 时 skip）。

@@ -92,6 +92,7 @@ func main() {
 	notifies := storage.NewNotifications(db)
 	rates := storage.NewRates(db)
 	monLogs := storage.NewMonitorLogs(db)
+	failures := storage.NewFailures(db)
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, monLogs, cipher)
 	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
@@ -99,12 +100,13 @@ func main() {
 		MinChangePct:       cfg.Notifications.MinChangePct,
 		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
 		ForecastCooldown:   time.Duration(cfg.Forecast.CooldownMinutes) * time.Minute,
+		FailureCooldown:    time.Duration(cfg.Notifications.FailureCooldownMinutes) * time.Minute,
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log, monitor.ForecastConfig{
 		WindowDays: cfg.Forecast.WindowDays,
 		AlertDays:  cfg.Forecast.AlertDays,
-	})
+	}, monitor.NewFailureTracker(failures, cfg.Notifications.FailureThreshold, log))
 
 	upd := updater.New(cfg.Updater.GithubRepo, cfg.Updater.GithubProxy, log)
 

@@ -187,6 +187,10 @@ const (
 	EventLoginFailed   NotificationEvent = "login_failed"
 	EventCaptchaFailed NotificationEvent = "captcha_failed"
 	EventMonitorFailed NotificationEvent = "monitor_failed"
+	// EventLoginRecovered / EventMonitorRecovered 失败 streak 达阈值告警后的恢复通知
+	//（docs/specs/failure-recovery.md）。恢复事件不参与冷却（每失败周期天然至多一条）。
+	EventLoginRecovered   NotificationEvent = "login_recovered"
+	EventMonitorRecovered NotificationEvent = "monitor_recovered"
 )
 
 // NotificationLog 通知发送记录。
@@ -222,6 +226,23 @@ type NotificationCooldown struct {
 }
 
 func (NotificationCooldown) TableName() string { return "notification_cooldowns" }
+
+// FailureStreak 渠道某 job 的连续失败计数（表 failure_streaks）。
+//
+// 业务键 (ChannelID, Job)——刻意按 job 维度而非事件维度：monitor_failed 事件被
+// balance / rates 两个 job 共用，按事件计数会被对方的成功稀释（docs/specs/failure-recovery.md 背景）。
+// 同样刻意不存"已告警"标志：count >= threshold 即意味着告警已被派发，
+// 恢复通知的判定只需要 count。
+type FailureStreak struct {
+	ChannelID     uint       `gorm:"primaryKey" json:"channel_id"`
+	Job           MonitorJob `gorm:"primaryKey;size:32" json:"job"`
+	Count         int64      `gorm:"not null" json:"count"`
+	FirstFailedAt time.Time  `gorm:"not null" json:"first_failed_at"`
+	LastFailedAt  time.Time  `gorm:"not null" json:"last_failed_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+func (FailureStreak) TableName() string { return "failure_streaks" }
 
 // MonitorJob 监控任务类型。
 type MonitorJob string

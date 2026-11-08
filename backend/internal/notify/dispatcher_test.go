@@ -503,3 +503,76 @@ func TestSendWithRetry(t *testing.T) {
 		t.Errorf("cancelled ctx should not send, calls = %d", n4.calls)
 	}
 }
+
+// ---------- P1-4：失败事件冷却（docs/specs/failure-recovery.md AC-1） ----------
+
+// TestCooldownForEventFailureEvents login_failed / monitor_failed 走 FailureCooldown；
+// 恢复事件不参与冷却（每失败周期天然至多一条）；balance 系冷却互不掺和。
+func TestCooldownForEventFailureEvents(t *testing.T) {
+	p := Policy{
+		FailureCooldown:    time.Hour,
+		BalanceLowCooldown: 2 * time.Hour,
+		ForecastCooldown:   3 * time.Hour,
+	}
+	for _, tc := range []struct {
+		event        storage.NotificationEvent
+		wantCooldown time.Duration
+		wantEligible bool
+	}{
+		{storage.EventLoginFailed, time.Hour, true},
+		{storage.EventMonitorFailed, time.Hour, true},
+		{storage.EventBalanceLow, 2 * time.Hour, true},
+		{storage.EventBalanceForecast, 3 * time.Hour, true},
+		{storage.EventRateChanged, 0, false},
+		{storage.EventLoginRecovered, 0, false},
+		{storage.EventMonitorRecovered, 0, false},
+	} {
+		got, eligible := cooldownForEvent(p, tc.event)
+		if got != tc.wantCooldown || eligible != tc.wantEligible {
+			t.Errorf("cooldownForEvent(%v) = (%v, %v), want (%v, %v)",
+				tc.event, got, eligible, tc.wantCooldown, tc.wantEligible)
+		}
+	}
+}
+
+// TestDispatchSuppressFailureEvents 失败事件经 Dispatch 走冷却：
+// 命中抑制 / 存储出错照发（fail-open）/ 未配置绕过；恢复事件永不 claim。
+func TestDispatchSuppressFailureEvents(t *testing.T) {
+	failMsg := Message{Event: storage.EventLoginFailed, ChannelID: 1, Subject: "s", Body: "b"}
+
+	for _, tc := range []struct {
+		name       string
+		msg        Message
+		policy     Policy
+		claimOK    bool
+		claimErr   error
+		wantSent   int
+		wantClaims int
+	}{
+		{"claim ok sends", failMsg, Policy{FailureCooldown: time.Minute}, true, nil, 1, 1},
+		{"claim false suppresses", failMsg, Policy{FailureCooldown: time.Minute}, false, nil, 0, 1},
+		{"cooldown store error sends anyway", failMsg, Policy{FailureCooldown: time.Minute}, false, errors.New("db down"), 1, 1},
+		{"monitor_failed shares the failure cooldown", Message{Event: storage.EventMonitorFailed, ChannelID: 1}, Policy{FailureCooldown: time.Minute}, false, nil, 0, 1},
+		{"failure cooldown disabled bypasses", failMsg, Policy{}, false, nil, 1, 0},
+		{"balance_low cooldown does not apply to failures", failMsg, Policy{BalanceLowCooldown: time.Hour}, false, nil, 1, 0},
+		{"system message channel 0 bypasses", Message{Event: storage.EventLoginFailed, ChannelID: 0}, Policy{FailureCooldown: time.Minute}, false, nil, 1, 0},
+		{"recovery events never claim", Message{Event: storage.EventLoginRecovered, ChannelID: 1}, Policy{FailureCooldown: time.Minute}, false, nil, 1, 0},
+	} {
+		state := &fakeState{}
+		registerFake(t, state)
+		store := &fakeStore{channels: []storage.NotificationChannel{
+			fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+		}}
+		cd := &fakeCooldown{ok: tc.claimOK, err: tc.claimErr}
+		d := newFakeDispatcher(t, store, cd, tc.policy)
+		if err := d.Dispatch(context.Background(), tc.msg); err != nil {
+			t.Fatalf("%s: Dispatch: %v", tc.name, err)
+		}
+		if got := len(state.sent()); got != tc.wantSent {
+			t.Errorf("%s: sends = %d, want %d", tc.name, got, tc.wantSent)
+		}
+		if cd.calls != tc.wantClaims {
+			t.Errorf("%s: cooldown claims = %d, want %d", tc.name, cd.calls, tc.wantClaims)
+		}
+	}
+}

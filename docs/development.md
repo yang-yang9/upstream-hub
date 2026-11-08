@@ -120,3 +120,5 @@ cd backend && go run ./cmd/server   # 需本地 PostgreSQL + 配置，见 deploy
 | [monitor-rate-scanning.md](specs/monitor-rate-scanning.md) | 余额 / 倍率扫描与变化检测 |
 | [notification-dispatch.md](specs/notification-dispatch.md) | 通知分发、去抖与订阅过滤 |
 | [scheduler-retention.md](specs/scheduler-retention.md) | 定时调度与历史数据清理 |
+| [usage-forecast.md](specs/usage-forecast.md) | 余额消耗速率与到期预测 |
+| [failure-recovery.md](specs/failure-recovery.md) | 失败风暴防刷屏与恢复通知 |

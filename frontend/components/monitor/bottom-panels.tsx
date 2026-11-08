@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Send,
+  ShieldCheck,
   ShieldX,
   TestTube2,
   Trash2,
@@ -40,6 +41,8 @@ const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string }> = 
   captcha_failed: { icon: KeyRound, cls: "text-danger" },
   rate_changed: { icon: ArrowUpRight, cls: "text-brand" },
   monitor_failed: { icon: ShieldX, cls: "text-danger" },
+  login_recovered: { icon: ShieldCheck, cls: "text-success" },
+  monitor_recovered: { icon: ShieldCheck, cls: "text-success" },
 }
 
 export function AlertFeed() {

@@ -109,12 +109,18 @@ type RetentionConfig struct {
 //   - BalanceLowCooldownMinutes：同一渠道的 balance_low 在 X 分钟内不重复推送。
 //     0 = 不冷却（每次扫描发现仍 < 阈值都发）。冷却状态持久化在 PostgreSQL 的
 //     notification_cooldowns 表，跨重启生效。
+//   - FailureThreshold：连续失败 N 次才派发失败告警（滤掉瞬时抖动）；<=1 每次失败即告警。
+//     计数按 job 维度（登录 / 余额 / 倍率），持久化在 failure_streaks 表。
+//   - FailureCooldownMinutes：login_failed / monitor_failed 同渠道在 X 分钟内不重复推送
+//     （失败风暴节流；窗口过后重发起"还在异常"提醒）。0 = 不冷却。
 //   - SendMaxAttempts：单条通知发送失败时最多尝试次数（含首次）。
 //     1 = 不重试。重试采用指数退避：1s / 2s / 4s …，上限 30s。
 type NotificationsConfig struct {
 	BatchRateChanges          bool    `mapstructure:"batchRateChanges"`
 	MinChangePct              float64 `mapstructure:"minChangePct"`
 	BalanceLowCooldownMinutes int     `mapstructure:"balanceLowCooldownMinutes"`
+	FailureThreshold          int     `mapstructure:"failureThreshold"`
+	FailureCooldownMinutes    int     `mapstructure:"failureCooldownMinutes"`
 	SendMaxAttempts           int     `mapstructure:"sendMaxAttempts"`
 }
 
@@ -182,6 +188,8 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("forecast.windowDays", "UPSTREAMHUB_FORECAST_WINDOW_DAYS")
 	_ = v.BindEnv("forecast.alertDays", "UPSTREAMHUB_FORECAST_ALERT_DAYS")
 	_ = v.BindEnv("forecast.cooldownMinutes", "UPSTREAMHUB_FORECAST_COOLDOWN_MINUTES")
+	_ = v.BindEnv("notifications.failureThreshold", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_THRESHOLD")
+	_ = v.BindEnv("notifications.failureCooldownMinutes", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_COOLDOWN_MINUTES")
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -230,6 +238,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.batchRateChanges", true)
 	v.SetDefault("notifications.minChangePct", 0)
 	v.SetDefault("notifications.balanceLowCooldownMinutes", 60)
+	v.SetDefault("notifications.failureThreshold", 3)
+	v.SetDefault("notifications.failureCooldownMinutes", 60)
 	v.SetDefault("notifications.sendMaxAttempts", 3)
 
 	v.SetDefault("forecast.windowDays", 7)

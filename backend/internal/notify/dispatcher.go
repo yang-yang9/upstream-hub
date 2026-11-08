@@ -81,8 +81,8 @@ func (d *Dispatcher) Send(ctx context.Context, ch *storage.NotificationChannel, 
 // 订阅过滤：渠道配置 Subscriptions 非空时，必须有任意一条订阅命中 msg 才发送；
 // 空订阅列表（""/null/[]）视为"订阅一切"，向后兼容已有通知渠道。
 //
-// 去抖：balance_low / balance_forecast_low 同渠道在各自冷却窗口内不重复推送，
-// 状态在 PostgreSQL 里持久化。
+// 去抖：balance_low / balance_forecast_low / login_failed / monitor_failed 同渠道
+// 在各自冷却窗口内不重复推送，状态在 PostgreSQL 里持久化。
 // 失败：按 SendMaxAttempts 进行指数退避重试。
 func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
 	if d.suppress(msg) {
@@ -170,7 +170,8 @@ func subsetForSubscriptions(upstreamID uint, changes []RateChange, subs []Subscr
 }
 
 // suppress 判断是否要按 cooldown 跳过本次发送。
-// 只对带独立冷却配置的事件生效（balance_low / balance_forecast_low，见 cooldownForEvent）。
+// 只对带独立冷却配置的事件生效（balance_low / balance_forecast_low /
+// login_failed / monitor_failed，见 cooldownForEvent）。
 func (d *Dispatcher) suppress(msg Message) bool {
 	cooldown, eligible := cooldownForEvent(d.policy, msg.Event)
 	if !eligible {
@@ -201,13 +202,16 @@ func (d *Dispatcher) suppress(msg Message) bool {
 }
 
 // cooldownForEvent 事件 → 冷却配置的映射。返回 false 表示该事件不参与冷却
-// （rate_changed 等高频事件由合并 / 阈值过滤控量，不用冷却）。
+// （rate_changed 等高频事件由合并 / 阈值过滤控量；恢复事件每失败周期天然至多一条，
+// 都不用冷却。对应 spec：docs/specs/failure-recovery.md AC-1）。
 func cooldownForEvent(p Policy, event storage.NotificationEvent) (time.Duration, bool) {
 	switch event {
 	case storage.EventBalanceLow:
 		return p.BalanceLowCooldown, true
 	case storage.EventBalanceForecast:
 		return p.ForecastCooldown, true
+	case storage.EventLoginFailed, storage.EventMonitorFailed:
+		return p.FailureCooldown, true
 	}
 	return 0, false
 }
