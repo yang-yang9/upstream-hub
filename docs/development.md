@@ -125,3 +125,4 @@ cd backend && go run ./cmd/server   # 需本地 PostgreSQL + 配置，见 deploy
 | [rate-compare.md](specs/rate-compare.md) | 跨渠道比价双视图 |
 | [metrics-export.md](specs/metrics-export.md) | /metrics Prometheus 暴露 |
 | [quiet-hours-cooldown.md](specs/quiet-hours-cooldown.md) | 静默时段与 per-channel 冷却覆盖 |
+| [balance-recovery.md](specs/balance-recovery.md) | 余额回升恢复通知（默认关） |

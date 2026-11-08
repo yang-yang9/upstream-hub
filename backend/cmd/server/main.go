@@ -112,7 +112,7 @@ func main() {
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log, monitor.ForecastConfig{
 		WindowDays: cfg.Forecast.WindowDays,
 		AlertDays:  cfg.Forecast.AlertDays,
-	}, monitor.NewFailureTracker(failures, cfg.Notifications.FailureThreshold, log))
+	}, monitor.NewFailureTracker(failures, cfg.Notifications.FailureThreshold, log), cfg.Notifications.BalanceRecovery)
 
 	upd := updater.New(cfg.Updater.GithubRepo, cfg.Updater.GithubProxy, log)
 

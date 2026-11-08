@@ -27,6 +27,7 @@ export type MonitorJob = "login" | "refresh" | "balance" | "rates"
 export type NotificationEvent =
   | "balance_low"
   | "balance_forecast_low"
+  | "balance_recovered"
   | "rate_changed"
   | "login_failed"
   | "captcha_failed"

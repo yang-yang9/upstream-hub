@@ -350,6 +350,7 @@ ssh user@server '
 | UPSTREAMHUB_NOTIFICATIONS_MINCHANGEPCT | `0` | 涨跌幅 < X% 的倍率变化跳过推送。0=全发。 |
 | UPSTREAMHUB_NOTIFICATIONS_BALANCELOWCOOLDOWNMINUTES | `60` | 同渠道 `balance_low` 推送冷却分钟。0=不冷却。 |
 | UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS | *(空)* | 静默时段 `HH:MM-HH:MM`（服务器本地时区），窗口内全部通知不推送、不占冷却名额。空=关闭（7×24 照发）。跨午夜写法如 `23:00-08:00`；非法格式拒绝启动。 |
+| UPSTREAMHUB_NOTIFICATIONS_BALANCERECOVERY | `false` | 余额恢复通知开关。`true` = 低余额告警后余额回升到阈值之上时发"余额已恢复"（`balance_recovered`）。默认关闭；关闭时只维护内部状态列，通知行为不变。 |
 | UPSTREAMHUB_NOTIFICATIONS_SENDMAXATTEMPTS | `3` | 通知失败最大尝试次数（含首次），指数退避。 |
 | **GITHUB_PROXY** *(特殊)* | — | 升级时访问 GitHub 的代理前缀，国内网络必填，如 `https://ghproxy.com`。详见下文「升级」。 |
 | UPSTREAMHUB_UPDATER_GITHUBREPO | `yang-yang9/upstream-hub` | 升级检查的 GitHub 仓库。fork 自用且自行发版时改成自己的 `owner/repo`。 |
@@ -501,6 +502,7 @@ GITHUB_PROXY=https://ghproxy.com
 - **MinChangePct**：涨跌幅太小的不推送（仍写日志）。
 - **BalanceLowCooldownMinutes**：同渠道余额低告警的冷却期，跨重启生效（存 PostgreSQL）。
 - **QuietHours**：静默时段（默认关闭）。窗口内全部通知不推送、也不占冷却名额——冷却窗口从出窗后首次触发起算，不会因为静默吞掉。测试发送不受影响。
+- **BalanceRecovery**：余额恢复通知（默认关闭，`UPSTREAMHUB_NOTIFICATIONS_BALANCERECOVERY=true` 开启）。余额低于阈值触发过告警的渠道，余额回升到阈值之上时发一条"余额已恢复"。恢复通知不参与冷却、受静默时段约束。详见 [specs/balance-recovery.md](specs/balance-recovery.md)。
 - **SendMaxAttempts**：失败指数退避重试。
 
 冷却还可以在渠道表单里按渠道覆盖（`balance_low` / `balance_forecast_low` / `login_failed` / `monitor_failed` 四类事件各配独立分钟数，0 = 不冷却，留空跟随全局），详见 [specs/quiet-hours-cooldown.md](specs/quiet-hours-cooldown.md)。

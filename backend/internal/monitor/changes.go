@@ -71,3 +71,39 @@ func balanceLowMessage(c *storage.Channel, balance float64) (notify.Message, boo
 		Cooldown:  cooldownOverrides(c),
 	}, true
 }
+
+// balancePlan 一次余额扫描后的低余额状态迁移计划（P0-3，docs/specs/balance-recovery.md）。
+type balancePlan struct {
+	message  notify.Message // 恢复消息；send=false 时零值
+	send     bool           // 是否派发恢复通知
+	low      bool           // 本次扫描后的目标状态（balance_low_active）
+	changed  bool           // 目标状态与当前值不同，需持久化
+}
+
+// balanceStatePlan 依据本次扫描余额决定低余额状态迁移与恢复通知。
+// 标记 / 清除始终维护（与 balanceLowMessage 的严格小于语义对称：balance >= threshold
+// 即视为已恢复）；recoveryEnabled 只控制恢复通知的派发（默认关，spec AC-1）。
+// 阈值 <= 0（未配置 / 已删除）时静默清除既有标记——"恢复"无从界定，不发通知。
+func balanceStatePlan(c *storage.Channel, balance float64, recoveryEnabled bool) balancePlan {
+	// 低于阈值：标记（告警是否被冷却 / 静默压掉不影响状态，与 P1-4 streak 语义一致）。
+	if c.BalanceThreshold > 0 && balance < c.BalanceThreshold {
+		return balancePlan{low: true, changed: !c.BalanceLowActive}
+	}
+	// 回升（或阈值被删）：只在曾标记过时迁移。
+	if !c.BalanceLowActive {
+		return balancePlan{}
+	}
+	p := balancePlan{low: false, changed: true}
+	if c.BalanceThreshold > 0 && recoveryEnabled {
+		p.message = notify.Message{
+			Event:     storage.EventBalanceRecovered,
+			ChannelID: c.ID,
+			Subject:   fmt.Sprintf("[upstream-hub] %s 余额已恢复", c.Name),
+			Body:      fmt.Sprintf("当前余额: %.4f，阈值: %.4f", balance, c.BalanceThreshold),
+			// 恢复事件不参与冷却，但照常携带覆盖（Dispatcher 对非冷却事件忽略它）。
+			Cooldown: cooldownOverrides(c),
+		}
+		p.send = true
+	}
+	return p
+}

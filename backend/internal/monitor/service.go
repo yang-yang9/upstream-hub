@@ -24,6 +24,9 @@ type Service struct {
 	log         *slog.Logger
 	forecast    ForecastConfig
 	failures    *FailureTracker
+	// balanceRecovery 余额恢复通知开关（P0-3，docs/specs/balance-recovery.md）：
+	// false = 只维护 balance_low_active 状态列，不派发 balance_recovered。
+	balanceRecovery bool
 }
 
 func NewService(
@@ -35,16 +38,18 @@ func NewService(
 	log *slog.Logger,
 	forecast ForecastConfig,
 	failures *FailureTracker,
+	balanceRecovery bool,
 ) *Service {
 	return &Service{
-		channels:    channels,
-		rates:       rates,
-		monitorLogs: monitorLogs,
-		channelSvc:  channelSvc,
-		dispatcher:  dispatcher,
-		log:         log,
-		forecast:    forecast,
-		failures:    failures,
+		channels:        channels,
+		rates:           rates,
+		monitorLogs:     monitorLogs,
+		channelSvc:      channelSvc,
+		dispatcher:      dispatcher,
+		log:             log,
+		forecast:        forecast,
+		failures:        failures,
+		balanceRecovery: balanceRecovery,
 	}
 }
 
@@ -127,8 +132,28 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	if msg, ok := balanceLowMessage(c, res.Balance); ok {
 		_ = s.dispatcher.Dispatch(ctx, msg)
 	}
+	s.trackBalanceState(ctx, c, res.Balance)
 	s.dispatchForecast(ctx, c)
 	return nil
+}
+
+// trackBalanceState 低余额状态迁移与恢复通知（P0-3，docs/specs/balance-recovery.md）。
+// 标记 / 清除不受开关影响；回升且开关开时派发 balance_recovered。
+// 状态持久化失败 fail-open 照发通知（漏标记可接受、漏通知不可接受，与 P1-4 同语义）。
+func (s *Service) trackBalanceState(ctx context.Context, c *storage.Channel, balance float64) {
+	plan := balanceStatePlan(c, balance, s.balanceRecovery)
+	if plan.changed {
+		if err := s.channels.SetBalanceLowActive(c.ID, plan.low); err != nil {
+			s.log.Warn("set balance_low_active failed", "channel", c.Name, "err", err)
+		} else {
+			c.BalanceLowActive = plan.low
+		}
+	}
+	if plan.send {
+		if err := s.dispatcher.Dispatch(ctx, plan.message); err != nil {
+			s.log.Warn("dispatch balance recovery failed", "channel", c.Name, "err", err)
+		}
+	}
 }
 
 // Forecast 现算某渠道的余额消耗预测（不落库，快照即真相）。

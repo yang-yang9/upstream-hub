@@ -25,7 +25,7 @@ func newForecastRouter(t *testing.T) (*gin.Engine, *storage.Channels, *storage.R
 	channels := storage.NewChannels(db)
 	rates := storage.NewRates(db)
 	mon := monitor.NewService(channels, rates, nil, nil, nil, slog.Default(), monitor.ForecastConfig{WindowDays: 7},
-		monitor.NewFailureTracker(storage.NewFailures(db), 3, slog.Default()))
+		monitor.NewFailureTracker(storage.NewFailures(db), 3, slog.Default()), false)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

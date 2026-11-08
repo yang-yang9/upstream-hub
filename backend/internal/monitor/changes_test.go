@@ -120,8 +120,8 @@ func TestBalanceLowMessageCarriesCooldown(t *testing.T) {
 		t.Fatal("ok = false, want true")
 	}
 	want := notify.CooldownOverrides{
-		storage.EventBalanceLow:     10 * time.Minute,
-		storage.EventMonitorFailed:  5 * time.Minute,
+		storage.EventBalanceLow:    10 * time.Minute,
+		storage.EventMonitorFailed: 5 * time.Minute,
 	}
 	if len(msg.Cooldown) != len(want) {
 		t.Fatalf("msg.Cooldown = %v, want %v", msg.Cooldown, want)
@@ -147,5 +147,131 @@ func TestBalanceLowMessageCarriesCooldown(t *testing.T) {
 	}
 	if len(msg.Cooldown) != 0 {
 		t.Errorf("非法 JSON 时 msg.Cooldown = %v, want 空（回落全局）", msg.Cooldown)
+	}
+}
+
+// TDD red：balanceStatePlan 尚不存在（P0-3，将在 monitor/changes.go 实现）。
+// 对应 spec：docs/specs/balance-recovery.md AC-2 / AC-3。
+func TestBalanceStatePlan(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		channel storage.Channel // BalanceThreshold / BalanceLowActive / NotifyCooldowns
+		balance float64
+		enabled bool
+		wantLow bool
+		wantChg bool
+		wantSnd bool
+	}{
+		{
+			name:    "未配置阈值且未标记：什么都不做",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 0},
+			balance: 5,
+			enabled: true,
+		},
+		{
+			name:    "阈值删除后静默清标记（不发通知）",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 0, BalanceLowActive: true},
+			balance: 5,
+			enabled: true,
+			wantChg: true, // 清标记
+		},
+		{
+			name:    "首次低于阈值：标记",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10},
+			balance: 5,
+			enabled: true,
+			wantLow: true, wantChg: true,
+		},
+		{
+			name:    "持续低于阈值：状态不变不重复写库",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10, BalanceLowActive: true},
+			balance: 5,
+			enabled: true,
+			wantLow: true,
+		},
+		{
+			name:    "回升但从未标记：无迁移",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10},
+			balance: 15,
+			enabled: true,
+		},
+		{
+			name:    "回升且已标记但开关关：清标记不发通知",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10, BalanceLowActive: true},
+			balance: 15,
+			enabled: false,
+			wantChg: true,
+		},
+		{
+			name:    "回升且已标记且开关开：发恢复",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10, BalanceLowActive: true},
+			balance: 15,
+			enabled: true,
+			wantChg: true, wantSnd: true,
+		},
+		{
+			name:    "余额恰好等于阈值视为已恢复",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10, BalanceLowActive: true},
+			balance: 10,
+			enabled: true,
+			wantChg: true, wantSnd: true,
+		},
+		{
+			name:    "低于阈值与开关无关（标记始终维护）",
+			channel: storage.Channel{ID: 1, BalanceThreshold: 10},
+			balance: 5,
+			enabled: false,
+			wantLow: true, wantChg: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := tc.channel
+			plan := balanceStatePlan(&c, tc.balance, tc.enabled)
+			if plan.low != tc.wantLow {
+				t.Errorf("plan.low = %v, want %v", plan.low, tc.wantLow)
+			}
+			if plan.changed != tc.wantChg {
+				t.Errorf("plan.changed = %v, want %v", plan.changed, tc.wantChg)
+			}
+			if plan.send != tc.wantSnd {
+				t.Errorf("plan.send = %v, want %v", plan.send, tc.wantSnd)
+			}
+			if !plan.send && plan.message.Event != "" {
+				t.Errorf("不派发时 message.Event = %q, want 空", plan.message.Event)
+			}
+		})
+	}
+}
+
+// 对应 spec：balance-recovery.md AC-3 消息格式 + AC-2 标记语义
+// （标记与告警是否被冷却 / 静默压掉无关，纯函数只看余额与阈值）。
+func TestBalanceRecoveryMessage(t *testing.T) {
+	c := &storage.Channel{
+		ID:               9,
+		Name:             "alpha",
+		BalanceThreshold: 10,
+		BalanceLowActive: true,
+		NotifyCooldowns:  `{"balance_low":10}`,
+	}
+	plan := balanceStatePlan(c, 12.5, true)
+	if !plan.send {
+		t.Fatal("plan.send = false, want true")
+	}
+	msg := plan.message
+	if msg.Event != storage.EventBalanceRecovered {
+		t.Errorf("Event = %q, want balance_recovered", msg.Event)
+	}
+	if msg.ChannelID != 9 {
+		t.Errorf("ChannelID = %d, want 9", msg.ChannelID)
+	}
+	if msg.Subject != "[upstream-hub] alpha 余额已恢复" {
+		t.Errorf("Subject = %q", msg.Subject)
+	}
+	if msg.Body != "当前余额: 12.5000，阈值: 10.0000" {
+		t.Errorf("Body = %q", msg.Body)
+	}
+	// 照常携带 per-channel 冷却覆盖（Dispatcher 对非冷却事件忽略它）。
+	if msg.Cooldown[storage.EventBalanceLow] != 10*time.Minute {
+		t.Errorf("msg.Cooldown = %v, want 携带 balance_low 10m", msg.Cooldown)
 	}
 }

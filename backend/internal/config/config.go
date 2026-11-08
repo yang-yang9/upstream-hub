@@ -128,6 +128,10 @@ type NotificationsConfig struct {
 	FailureCooldownMinutes    int     `mapstructure:"failureCooldownMinutes"`
 	QuietHours                string  `mapstructure:"quietHours"`
 	SendMaxAttempts           int     `mapstructure:"sendMaxAttempts"`
+	// BalanceRecovery 余额恢复通知开关（P0-3，docs/specs/balance-recovery.md）：
+	// true = 低余额告警后回升到阈值之上时派发 balance_recovered。默认 false = 关闭
+	// （通知行为与现状一致）；balance_low_active 状态列不受开关影响照常维护。
+	BalanceRecovery bool `mapstructure:"balanceRecovery"`
 }
 
 // ForecastConfig 余额消耗预测（docs/specs/usage-forecast.md）。
@@ -197,6 +201,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("notifications.failureThreshold", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_THRESHOLD")
 	_ = v.BindEnv("notifications.failureCooldownMinutes", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_COOLDOWN_MINUTES")
 	_ = v.BindEnv("notifications.quietHours", "UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS")
+	_ = v.BindEnv("notifications.balanceRecovery", "UPSTREAMHUB_NOTIFICATIONS_BALANCERECOVERY")
 	_ = v.BindEnv("server.metricsToken", "UPSTREAMHUB_METRICS_TOKEN")
 
 	if err := v.ReadInConfig(); err != nil {

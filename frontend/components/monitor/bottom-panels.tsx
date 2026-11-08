@@ -14,6 +14,7 @@ import {
   ShieldX,
   TestTube2,
   Trash2,
+  Wallet,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -37,6 +38,7 @@ import type {
 const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string }> = {
   balance_low: { icon: AlertTriangle, cls: "text-warning" },
   balance_forecast_low: { icon: Hourglass, cls: "text-warning" },
+  balance_recovered: { icon: Wallet, cls: "text-success" },
   login_failed: { icon: ShieldX, cls: "text-danger" },
   captcha_failed: { icon: KeyRound, cls: "text-danger" },
   rate_changed: { icon: ArrowUpRight, cls: "text-brand" },

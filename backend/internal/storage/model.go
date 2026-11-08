@@ -62,6 +62,11 @@ type Channel struct {
 	// fail-open 解析填入 Message.Cooldown，脏数据回退全局。
 	NotifyCooldowns string `gorm:"type:text" json:"notify_cooldowns"`
 
+	// BalanceLowActive 低余额告警状态（P0-3，docs/specs/balance-recovery.md）：monitor 在
+	// 余额扫描时维护（低于阈值置 true、回升清 false，不受恢复开关影响），回升且开关开时
+	// 派发 balance_recovered。运行时状态：渠道创建 / 更新 API 不接受该字段。
+	BalanceLowActive bool `gorm:"default:false" json:"balance_low_active"`
+
 	// 最近一次采集结果（聚合视图，便于列表页直接展示）
 	LastBalance   *float64   `json:"last_balance,omitempty"`
 	LastBalanceAt *time.Time `json:"last_balance_at,omitempty"`
@@ -195,6 +200,9 @@ const (
 	EventBalanceLow    NotificationEvent = "balance_low"
 	// EventBalanceForecast 余额按当前消耗速率预计 N 天内耗尽（docs/specs/usage-forecast.md）。
 	EventBalanceForecast NotificationEvent = "balance_forecast_low"
+	// EventBalanceRecovered 低余额告警后回升到阈值之上的恢复通知（docs/specs/balance-recovery.md）。
+	// 与失败类恢复事件同语义：不参与冷却，派发受 notifications.balanceRecovery 开关控制（默认关）。
+	EventBalanceRecovered NotificationEvent = "balance_recovered"
 	EventRateChanged   NotificationEvent = "rate_changed"
 	EventLoginFailed   NotificationEvent = "login_failed"
 	EventCaptchaFailed NotificationEvent = "captcha_failed"

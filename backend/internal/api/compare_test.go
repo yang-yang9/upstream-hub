@@ -24,7 +24,7 @@ func newCompareRouter(t *testing.T) (*gin.Engine, *gorm.DB, *storage.Channels, *
 	channels := storage.NewChannels(db)
 	rates := storage.NewRates(db)
 	mon := monitor.NewService(channels, rates, nil, nil, nil, slog.Default(), monitor.ForecastConfig{},
-		monitor.NewFailureTracker(storage.NewFailures(db), 3, slog.Default()))
+		monitor.NewFailureTracker(storage.NewFailures(db), 3, slog.Default()), false)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

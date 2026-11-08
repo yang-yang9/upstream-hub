@@ -44,6 +44,12 @@ func (r *Channels) SetLastError(id uint, msg string) error {
 	return r.db.Model(&Channel{}).Where("id = ?", id).Update("last_error", msg).Error
 }
 
+// SetBalanceLowActive 迁移低余额告警状态（P0-3，docs/specs/balance-recovery.md）。
+// 只更新该列；调用方（monitor）只在状态翻转时写，避免每次扫描都落库。
+func (r *Channels) SetBalanceLowActive(id uint, active bool) error {
+	return r.db.Model(&Channel{}).Where("id = ?", id).Update("balance_low_active", active).Error
+}
+
 // RotateTokenCredential only replaces the credentials observed before refresh.
 // A concurrent manual edit must never be overwritten by a delayed response.
 func (r *Channels) RotateTokenCredential(id uint, previous, next string) (bool, error) {

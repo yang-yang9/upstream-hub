@@ -85,3 +85,25 @@ func TestQuietHoursConfig(t *testing.T) {
 		t.Error("Load with 25:00-06:00 = nil error, want 拒绝启动")
 	}
 }
+
+// 对应 spec：docs/specs/balance-recovery.md AC-1。
+// balanceRecovery 是 camelCase key，不被 EnvKeyReplacer 映射，必须显式 BindEnv；
+// 默认 false = 恢复通知关闭（状态列照常维护）。
+func TestBalanceRecoveryConfig(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Notifications.BalanceRecovery {
+		t.Error("default BalanceRecovery = true, want false（默认关闭）")
+	}
+
+	t.Setenv("UPSTREAMHUB_NOTIFICATIONS_BALANCERECOVERY", "true")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Notifications.BalanceRecovery {
+		t.Error("BalanceRecovery from env = false, want true")
+	}
+}
