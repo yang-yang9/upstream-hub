@@ -169,20 +169,26 @@ func withPackageDatabase(t *testing.T, dsn string, callerSkip int) string {
 	return dbnameRe.ReplaceAllString(dsn, "dbname="+name)
 }
 
-// callerPackage 返回调用链上第 callerSkip 层（open 的调用者的调用者）所在包的
-// 目录名，用作数据库后缀。取不到时退化为 "pkg"。
+// callerPackage 返回调用链上第 skip 层（open 的调用者的调用者）所在文件所在的
+// 目录名（即包目录，如 "api"、"storage"），用作数据库后缀。取不到时退化为 "pkg"。
+// 注意 runtime.Caller(0) 是 callerPackage 自身这一帧，因此内部要 +1 跳过；
+// 之前的实现漏了这一帧，导致所有包都解析到 harness 自己，共用一个库，
+// `go test ./...` 并行跑包时互相 TRUNCATE 踩踏。
 func callerPackage(skip int) string {
-	_, file, _, ok := runtime.Caller(skip)
+	_, file, _, ok := runtime.Caller(skip + 1)
 	if !ok {
 		return "pkg"
 	}
-	file = strings.TrimSuffix(file, ".go")
 	for i := len(file) - 1; i >= 0; i-- {
 		if file[i] == '/' {
-			return sanitizeIdent(file[i+1:])
+			dir := file[:i]
+			if j := strings.LastIndexByte(dir, '/'); j >= 0 {
+				return sanitizeIdent(dir[j+1:])
+			}
+			return sanitizeIdent(dir)
 		}
 	}
-	return sanitizeIdent(file)
+	return "pkg"
 }
 
 var identRe = regexp.MustCompile(`[^a-z0-9_]`)

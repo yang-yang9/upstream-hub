@@ -15,9 +15,10 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/monitor"
 	"github.com/worryzyy/upstream-hub/internal/storage"
 	"github.com/worryzyy/upstream-hub/internal/storage/storagetest"
+	"gorm.io/gorm"
 )
 
-func newCompareRouter(t *testing.T) (*gin.Engine, *storage.Channels, *storage.Rates) {
+func newCompareRouter(t *testing.T) (*gin.Engine, *gorm.DB, *storage.Channels, *storage.Rates) {
 	t.Helper()
 	db := storagetest.Open(t)
 	channels := storage.NewChannels(db)
@@ -34,11 +35,11 @@ func newCompareRouter(t *testing.T) (*gin.Engine, *storage.Channels, *storage.Ra
 		Monitor:  mon,
 		Log:      slog.Default(),
 	})
-	return r, channels, rates
+	return r, db, channels, rates
 }
 
 func TestRateCompareEndpoint(t *testing.T) {
-	r, channels, rates := newCompareRouter(t)
+	r, db, channels, rates := newCompareRouter(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	seed := []struct {
@@ -65,10 +66,12 @@ func TestRateCompareEndpoint(t *testing.T) {
 			t.Fatalf("upsert %d/%s: %v", channelID, model, err)
 		}
 	}
+	// gamma 用独有分组名 svip：若也叫 vip，vip 就出现在 2 个渠道，
+	// min_channels=2 时不会被过滤，子测试的组数断言就与种子自相矛盾。
 	mustUpsert(ids["alpha"], "default", 1.0)
 	mustUpsert(ids["alpha"], "vip", 0.8)
 	mustUpsert(ids["beta"], "default", 1.2)
-	mustUpsert(ids["gamma"], "vip", 0.9)
+	mustUpsert(ids["gamma"], "svip", 0.9)
 
 	get := func(t *testing.T, r *gin.Engine, query string) monitor.RateCompareResult {
 		t.Helper()
@@ -103,7 +106,7 @@ func TestRateCompareEndpoint(t *testing.T) {
 			t.Errorf("alpha = %+v, want min @vip, 2 组", d.Channels[0])
 		}
 
-		// 分组视图：default（alpha+beta）保留、vip（仅 alpha 或仅 gamma）各只有 1 渠道被过滤。
+		// 分组视图：default（alpha+beta）保留；vip（仅 alpha）、svip（仅 gamma）各只有 1 渠道被过滤。
 		if len(d.Groups) != 1 || d.Groups[0].ModelName != "default" {
 			t.Fatalf("groups = %+v, want 仅 default 一组", d.Groups)
 		}
@@ -118,8 +121,8 @@ func TestRateCompareEndpoint(t *testing.T) {
 
 	t.Run("min_channels=1 保留单渠道分组", func(t *testing.T) {
 		d := get(t, r, "?min_channels=1")
-		if len(d.Groups) != 2 {
-			t.Fatalf("groups 长度 = %d, want 2（default + vip）", len(d.Groups))
+		if len(d.Groups) != 3 {
+			t.Fatalf("groups 长度 = %d, want 3（default + vip + svip）", len(d.Groups))
 		}
 	})
 
@@ -133,8 +136,10 @@ func TestRateCompareEndpoint(t *testing.T) {
 	})
 
 	t.Run("空数据返回空数组", func(t *testing.T) {
-		rEmpty, _, _ := newCompareRouter(t) // 全新库（Open 自带清表）
-		d := get(t, rEmpty, "")
+		// Open 的 TRUNCATE 在 t.Cleanup（整个测试结束）才执行，子测试之间不会自动清表，
+		// 必须显式 ResetTables 复位后查询。
+		storagetest.ResetTables(t, db, "channels", "rate_snapshots")
+		d := get(t, r, "")
 		if len(d.Channels) != 0 || len(d.Groups) != 0 {
 			t.Errorf("空库应得空数组, got %+v", d)
 		}
