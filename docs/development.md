@@ -122,3 +122,4 @@ cd backend && go run ./cmd/server   # 需本地 PostgreSQL + 配置，见 deploy
 | [scheduler-retention.md](specs/scheduler-retention.md) | 定时调度与历史数据清理 |
 | [usage-forecast.md](specs/usage-forecast.md) | 余额消耗速率与到期预测 |
 | [failure-recovery.md](specs/failure-recovery.md) | 失败风暴防刷屏与恢复通知 |
+| [rate-compare.md](specs/rate-compare.md) | 跨渠道比价双视图 |

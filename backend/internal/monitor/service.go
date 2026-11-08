@@ -149,6 +149,20 @@ func (s *Service) Forecast(channelID uint) (BurnForecast, bool, error) {
 	return f, ok, nil
 }
 
+// RateCompare 跨渠道比价双视图（docs/specs/rate-compare.md）。服务端现算，不落库。
+// minChannels 仅作用于视图 ②（同名分组比价）的过滤。
+func (s *Service) RateCompare(minChannels int) (RateCompareResult, error) {
+	channels, err := s.channels.List()
+	if err != nil {
+		return RateCompareResult{}, fmt.Errorf("list channels: %w", err)
+	}
+	snapshots, err := s.rates.ListAll()
+	if err != nil {
+		return RateCompareResult{}, fmt.Errorf("list rate snapshots: %w", err)
+	}
+	return buildRateCompare(snapshots, channels, minChannels), nil
+}
+
 // dispatchForecast 余额扫描尾部：预测临近耗尽时发 balance_forecast_low。
 // 计算或发送失败只写日志，不影响扫描本身（对应 spec：docs/specs/usage-forecast.md AC-6）。
 func (s *Service) dispatchForecast(ctx context.Context, c *storage.Channel) {

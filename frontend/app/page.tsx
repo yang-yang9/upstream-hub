@@ -2,6 +2,7 @@ import { KpiRow } from "@/components/monitor/kpi-row"
 import { BalanceOverview } from "@/components/monitor/balance-overview"
 import { MultiplierChanges } from "@/components/monitor/multiplier-changes"
 import { ChannelCards } from "@/components/monitor/channel-cards"
+import { RateCompare } from "@/components/monitor/rate-compare"
 import { BottomPanels } from "@/components/monitor/bottom-panels"
 
 export default function Page() {
@@ -19,6 +20,8 @@ export default function Page() {
       </div>
 
       <ChannelCards />
+
+      <RateCompare />
 
       <BottomPanels />
     </>

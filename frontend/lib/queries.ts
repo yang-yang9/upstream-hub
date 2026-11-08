@@ -13,6 +13,7 @@ import type {
   NotificationLog,
   RateChangeLog,
   RateSnapshot,
+  RateCompareResult,
   UpgradeCheckResult,
 } from "@/lib/api-types"
 
@@ -167,6 +168,11 @@ export function useRateChanges(limit = 20, channelID?: number) {
   q.set("limit", String(limit))
   if (channelID != null) q.set("channel_id", String(channelID))
   return useApi<RateChangeLog[]>(`/rate-changes?${q.toString()}`)
+}
+
+/** 跨渠道比价双视图。对应 spec：docs/specs/rate-compare.md AC-4。 */
+export function useRateCompare() {
+  return useApi<RateCompareResult>("/rate-compare")
 }
 
 export function useNotificationChannels() {

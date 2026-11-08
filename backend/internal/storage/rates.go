@@ -19,6 +19,15 @@ func (r *Rates) ListByChannel(channelID uint) ([]RateSnapshot, error) {
 	return list, nil
 }
 
+// ListAll 返回全部渠道的当前倍率快照（跨渠道比价用，docs/specs/rate-compare.md）。
+func (r *Rates) ListAll() ([]RateSnapshot, error) {
+	var list []RateSnapshot
+	if err := r.db.Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // Upsert 更新或插入倍率快照，返回此前的记录（若有），调用方据此判断是否变化。
 func (r *Rates) Upsert(snapshot *RateSnapshot) (*RateSnapshot, error) {
 	var prev RateSnapshot

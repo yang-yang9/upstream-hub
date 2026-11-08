@@ -174,6 +174,38 @@ export interface ChannelForecast {
   depleting: boolean
 }
 
+/** 跨渠道比价（GET /rate-compare）。对应 spec：docs/specs/rate-compare.md。 */
+export interface ChannelRateRank {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  min_ratio: number
+  min_group: string
+  group_count: number
+  last_seen_at: string
+}
+
+export interface RateCompareEntry {
+  channel_id: number
+  channel_name: string
+  channel_type: ChannelType
+  ratio: number
+  last_seen_at: string
+}
+
+export interface RateCompareGroup {
+  model_name: string
+  description?: string
+  entries: RateCompareEntry[]
+  best_channel_id: number
+  spread_pct: number
+}
+
+export interface RateCompareResult {
+  channels: ChannelRateRank[]
+  groups: RateCompareGroup[]
+}
+
 export interface UpgradeCheckResult {
   current_version: string
   latest_version: string
