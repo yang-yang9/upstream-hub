@@ -98,9 +98,13 @@ func main() {
 		BatchRateChanges:   cfg.Notifications.BatchRateChanges,
 		MinChangePct:       cfg.Notifications.MinChangePct,
 		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
+		ForecastCooldown:   time.Duration(cfg.Forecast.CooldownMinutes) * time.Minute,
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
-	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log)
+	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log, monitor.ForecastConfig{
+		WindowDays: cfg.Forecast.WindowDays,
+		AlertDays:  cfg.Forecast.AlertDays,
+	})
 
 	upd := updater.New(cfg.Updater.GithubRepo, cfg.Updater.GithubProxy, log)
 

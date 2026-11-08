@@ -26,6 +26,7 @@ export type MonitorJob = "login" | "refresh" | "balance" | "rates"
 
 export type NotificationEvent =
   | "balance_low"
+  | "balance_forecast_low"
   | "rate_changed"
   | "login_failed"
   | "captcha_failed"
@@ -157,6 +158,18 @@ export interface DashboardSummary {
 export interface BalanceTrendPoint {
   day: string
   balance: number
+}
+
+/** 余额消耗预测（GET /channels/:id/forecast）。对应 spec：docs/specs/usage-forecast.md。 */
+export interface ChannelForecast {
+  channel_id: number
+  daily_burn: number
+  latest: number
+  days_left: number
+  depleted_at: string | null
+  samples: number
+  window_days: number
+  depleting: boolean
 }
 
 export interface UpgradeCheckResult {

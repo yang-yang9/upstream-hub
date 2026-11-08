@@ -20,6 +20,7 @@
 ### 1.2 监控采集层（`backend/internal/monitor` + `backend/internal/scheduler`）
 
 - 余额扫描：cron 可配，写 `balance_snapshots` 快照 + 渠道表聚合字段
+- 余额消耗预测：对窗口内快照做线性回归得日均消耗，预测耗尽时点并提前告警（`balance_forecast_low`）
 - 倍率扫描：`rate_snapshots` upsert 当前态，差异写 `rate_change_logs`（ratio + completion_ratio 双维度比对）
 - 每渠道可独立开关监控、设余额阈值；单渠道失败不影响其他
 - 每次采集写 `monitor_logs`（成功 / 失败、耗时、错误信息）
@@ -29,15 +30,15 @@
 ### 1.3 通知层（`backend/internal/notify`）
 
 - 7 种通知渠道：Telegram / Webhook / Email(SMTP) / 企业微信 / 钉钉 / 飞书 / Bark
-- 5 类事件：`balance_low` / `rate_changed` / `login_failed` / `captcha_failed` / `monitor_failed`
+- 6 类事件：`balance_low` / `balance_forecast_low` / `rate_changed` / `login_failed` / `captcha_failed` / `monitor_failed`
 - 通知渠道配置 AES-GCM 加密落库
-- 去抖三件套：balance_low 冷却（PostgreSQL 持久化、跨重启）、同批倍率变化合并推送、MinChangePct 涨跌幅过滤（低于阈值仍写库、不推送）
+- 去抖：balance_low / balance_forecast_low 双事件独立冷却（PostgreSQL 持久化、跨重启）、同批倍率变化合并推送、MinChangePct 涨跌幅过滤（低于阈值仍写库、不推送）
 - 按通知渠道的订阅过滤（关心哪些上游 / 分组）、指数退避重试、发送日志、测试发送
 
 ### 1.4 展示与运维
 
 - Dashboard 聚合视图：总余额 / 最低余额 / active-failed 渠道数 / 最近倍率变化 / 最近通知
-- 余额趋势按小时 / 天聚合；渠道详情含倍率列表、余额历史、最近错误
+- 余额趋势按小时 / 天聚合；渠道详情含倍率列表、余额历史、最近错误；渠道卡片含余额消耗预测
 - 面板内自升级：检查 GitHub release → 下载 → checksum 校验 → 换二进制 → 重启（支持 GITHUB_PROXY）
 - 单用户后台登录：账号密码 + HMAC token + 滑动续期 + 绝对上限
 - `/healthz` 健康检查（含 DB ping）；Docker Compose / 单二进制部署
@@ -52,7 +53,7 @@
 
 | # | 能力 | 说明 |
 |---|------|------|
-| 1 | 余额消耗速率 & 到期预测 | `balance_snapshots` 时间序列已在库中但未利用。做线性回归计算日均消耗，预测"N 天后耗尽"并提前告警。比静态阈值实用：阈值是猜的，消耗速度是测的 |
+| 1 | ~~余额消耗速率 & 到期预测~~（已完成，spec 见 [specs/usage-forecast.md](specs/usage-forecast.md)） | `balance_snapshots` 时间序列已在库中但未利用。做线性回归计算日均消耗，预测"N 天后耗尽"并提前告警。比静态阈值实用：阈值是猜的，消耗速度是测的 |
 | 2 | 跨渠道比价 | 倍率变化目前只在单渠道内自比。应支持"同一分组在 A/B/C 渠道的当前倍率对比 + 性价比排序"，这是选上游场景的核心需求，数据现成 |
 | 3 | 告警恢复通知 | 只有触发、没有恢复。余额回升、错误清除后不发"已恢复"，用户无法区分"还在异常"和"已经好了" |
 
@@ -91,7 +92,7 @@
 ## 三、建议实施顺序
 
 ```
-P0-1 消耗预测 → P1-4 失败冷却/恢复 → P0-2 跨渠道比价
+P0-1 消耗预测（✅ 已完成） → P1-4 失败冷却/恢复 → P0-2 跨渠道比价
     → P2-8 API key Connector → P3-15 /metrics → 其余按需
 ```
 

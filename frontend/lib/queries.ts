@@ -7,6 +7,7 @@ import type {
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
+  ChannelForecast,
   DashboardSummary,
   NotificationChannel,
   NotificationLog,
@@ -154,6 +155,11 @@ export function useChannels() {
 
 export function useChannelRates(channelID: number | null) {
   return useApi<RateSnapshot[]>(channelID == null ? null : `/channels/${channelID}/rates`)
+}
+
+/** 余额消耗预测。channelID 为 null 时不发请求。对应 spec：docs/specs/usage-forecast.md AC-7。 */
+export function useChannelForecast(channelID: number | null) {
+  return useApi<ChannelForecast>(channelID == null ? null : `/channels/${channelID}/forecast`)
 }
 
 export function useRateChanges(limit = 20, channelID?: number) {

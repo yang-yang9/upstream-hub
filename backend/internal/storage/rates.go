@@ -83,6 +83,19 @@ func (r *Rates) DeleteBalanceSnapshotsBefore(cutoff time.Time) (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
+// ListBalanceSince 升序拉取某渠道 sampled_at >= since 的余额快照（消耗预测回归用）。
+// 与 BalanceHistory 的倒序 limit 语义互不影响。
+func (r *Rates) ListBalanceSince(channelID uint, since time.Time) ([]BalanceSnapshot, error) {
+	var list []BalanceSnapshot
+	if err := r.db.
+		Where("channel_id = ? AND sampled_at >= ?", channelID, since).
+		Order("sampled_at ASC").
+		Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // BalanceHistory 倒序拉取余额历史。
 func (r *Rates) BalanceHistory(channelID uint, limit int) ([]BalanceSnapshot, error) {
 	if limit <= 0 {

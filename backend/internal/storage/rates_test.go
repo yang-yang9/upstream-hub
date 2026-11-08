@@ -254,3 +254,44 @@ func TestAggregateBalanceTrendEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestListBalanceSince 窗口查询：只返回该渠道 sampled_at >= since 的行（升序），
+// 其它渠道与窗口外的行都不出现。对应 spec：docs/specs/usage-forecast.md AC-4。
+func TestListBalanceSince(t *testing.T) {
+	r := storagetest.Rates(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	seed := []storage.BalanceSnapshot{
+		{ChannelID: 1, Balance: 100, SampledAt: now.Add(-8 * 24 * time.Hour)}, // 窗口外
+		{ChannelID: 1, Balance: 80, SampledAt: now.Add(-6 * 24 * time.Hour)},
+		{ChannelID: 1, Balance: 60, SampledAt: now.Add(-3 * 24 * time.Hour)},
+		{ChannelID: 1, Balance: 40, SampledAt: now.Add(-1 * time.Hour)},
+		{ChannelID: 2, Balance: 7, SampledAt: now.Add(-2 * 24 * time.Hour)}, // 其它渠道
+	}
+	for i := range seed {
+		if err := r.AppendBalance(&seed[i]); err != nil {
+			t.Fatalf("AppendBalance: %v", err)
+		}
+	}
+
+	// 边界恰好等于 since（严格 >= 语义：包含）。
+	since := now.Add(-7 * 24 * time.Hour)
+	rows, err := r.ListBalanceSince(1, since)
+	if err != nil {
+		t.Fatalf("ListBalanceSince: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3（窗口外 8d 的被剔除、渠道 2 不出现）: %+v", len(rows), rows)
+	}
+	for i, want := range []float64{80, 60, 40} {
+		if rows[i].Balance != want {
+			t.Errorf("rows[%d].Balance = %v, want %v（升序）", i, rows[i].Balance, want)
+		}
+	}
+
+	// 无匹配 → 空切片不报错。
+	rows, err = r.ListBalanceSince(99, since)
+	if err != nil || len(rows) != 0 {
+		t.Errorf("no-match rows = %v, err = %v, want empty", rows, err)
+	}
+}

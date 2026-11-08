@@ -82,3 +82,14 @@ export function channelTypeLabel(t: string) {
       return t
   }
 }
+
+/** 消耗预测的剩余时间文案："预计 3.5 天后耗尽" / "预计 8 小时后耗尽" / "已耗尽"。
+ *  daysLeft <= 0 或非法值视为已耗尽（预测时点在过去）。对应 spec：docs/specs/usage-forecast.md。 */
+export function depletionText(daysLeft: number): string {
+  if (!Number.isFinite(daysLeft) || daysLeft <= 0) return "已耗尽"
+  if (daysLeft >= 1) {
+    return `预计 ${Number(daysLeft.toFixed(1))} 天后耗尽`
+  }
+  const hours = Math.max(1, Math.round(daysLeft * 24))
+  return `预计 ${hours} 小时后耗尽`
+}

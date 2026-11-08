@@ -205,13 +205,15 @@ func fakeChannel(t *testing.T, cipher *crypto.Cipher, id uint, name string, fail
 
 // fakeCooldown 可编排的冷却存储。
 type fakeCooldown struct {
-	ok    bool
-	err   error
-	calls int
+	ok     bool
+	err    error
+	calls  int
+	events []storage.NotificationEvent // 每次实际 claim 的事件，供断言事件→冷却映射
 }
 
 func (f *fakeCooldown) TryClaimCooldown(channelID uint, event storage.NotificationEvent, cooldown time.Duration) (bool, error) {
 	f.calls++
+	f.events = append(f.events, event)
 	return f.ok, f.err
 }
 
@@ -304,6 +306,53 @@ func TestDispatchSuppress(t *testing.T) {
 		}
 		if cd.calls != tc.wantClaims {
 			t.Errorf("%s: cooldown claims = %d, want %d", tc.name, cd.calls, tc.wantClaims)
+		}
+	}
+}
+
+// TestDispatchSuppressForecast 验证 balance_forecast_low 事件走独立的冷却配置：
+// 只受 Policy.ForecastCooldown 控制，与 balance_low 的冷却互不掺和。对应 spec：
+// docs/specs/usage-forecast.md AC-6。
+func TestDispatchSuppressForecast(t *testing.T) {
+	fcMsg := Message{Event: storage.EventBalanceForecast, ChannelID: 1, Subject: "s", Body: "b"}
+
+	for _, tc := range []struct {
+		name       string
+		msg        Message
+		policy     Policy
+		claimOK    bool
+		claimErr   error
+		wantSent   int
+		wantClaims int
+		wantEvent  storage.NotificationEvent
+	}{
+		{"claim ok sends", fcMsg, Policy{ForecastCooldown: time.Minute}, true, nil, 1, 1, storage.EventBalanceForecast},
+		{"claim false suppresses", fcMsg, Policy{ForecastCooldown: time.Minute}, false, nil, 0, 1, storage.EventBalanceForecast},
+		{"cooldown store error sends anyway", fcMsg, Policy{ForecastCooldown: time.Minute}, false, errors.New("db down"), 1, 1, storage.EventBalanceForecast},
+		{"forecast cooldown disabled bypasses", fcMsg, Policy{}, false, nil, 1, 0, ""},
+		{"balance_low cooldown does not apply to forecast", fcMsg, Policy{BalanceLowCooldown: time.Hour}, false, nil, 1, 0, ""},
+		{"forecast cooldown does not apply to balance_low", Message{Event: storage.EventBalanceLow, ChannelID: 1}, Policy{ForecastCooldown: time.Hour}, false, nil, 1, 0, ""},
+		{"system message channel 0 bypasses", Message{Event: storage.EventBalanceForecast, ChannelID: 0}, Policy{ForecastCooldown: time.Minute}, false, nil, 1, 0, ""},
+	} {
+		state := &fakeState{}
+		registerFake(t, state)
+		store := &fakeStore{channels: []storage.NotificationChannel{
+			fakeChannel(t, mustCipher(t), 1, "ch", 0, "[]"),
+		}}
+		cd := &fakeCooldown{ok: tc.claimOK, err: tc.claimErr}
+		d := newFakeDispatcher(t, store, cd, tc.policy)
+		if err := d.Dispatch(context.Background(), tc.msg); err != nil {
+			t.Fatalf("%s: Dispatch: %v", tc.name, err)
+		}
+		if got := len(state.sent()); got != tc.wantSent {
+			t.Errorf("%s: sends = %d, want %d", tc.name, got, tc.wantSent)
+		}
+		if cd.calls != tc.wantClaims {
+			t.Errorf("%s: cooldown claims = %d, want %d", tc.name, cd.calls, tc.wantClaims)
+			continue
+		}
+		if tc.wantClaims == 1 && len(cd.events) == 1 && cd.events[0] != tc.wantEvent {
+			t.Errorf("%s: claimed event = %v, want %v", tc.name, cd.events[0], tc.wantEvent)
 		}
 	}
 }

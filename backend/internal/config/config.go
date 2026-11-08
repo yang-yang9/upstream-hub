@@ -15,6 +15,7 @@ type Config struct {
 	Auth          AuthConfig          `mapstructure:"auth"`
 	Scheduler     SchedulerConfig     `mapstructure:"scheduler"`
 	Notifications NotificationsConfig `mapstructure:"notifications"`
+	Forecast      ForecastConfig      `mapstructure:"forecast"`
 	Updater       UpdaterConfig       `mapstructure:"updater"`
 	Log           LogConfig           `mapstructure:"log"`
 }
@@ -117,6 +118,17 @@ type NotificationsConfig struct {
 	SendMaxAttempts           int     `mapstructure:"sendMaxAttempts"`
 }
 
+// ForecastConfig 余额消耗预测（docs/specs/usage-forecast.md）。
+//
+//   - WindowDays：线性回归窗口（天），只用最近 N 天的余额快照参与回归。
+//   - AlertDays：预计耗尽天数 <= 该值时发 balance_forecast_low 告警；0 = 关闭告警。
+//   - CooldownMinutes：同渠道该事件在窗口内不重复推送（与 balance_low 冷却独立）。
+type ForecastConfig struct {
+	WindowDays      int `mapstructure:"windowDays"`
+	AlertDays       int `mapstructure:"alertDays"`
+	CooldownMinutes int `mapstructure:"cooldownMinutes"`
+}
+
 type LogConfig struct {
 	Level  string `mapstructure:"level"`
 	Format string `mapstructure:"format"`
@@ -166,6 +178,10 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("database.name", "UPSTREAMHUB_DATABASE_NAME")
 	_ = v.BindEnv("database.sslMode", "UPSTREAMHUB_DATABASE_SSLMODE")
 	_ = v.BindEnv("updater.githubProxy", "GITHUB_PROXY")
+	// camelCase 的 mapstructure key 不会被 replacer 映射，显式 BindEnv。
+	_ = v.BindEnv("forecast.windowDays", "UPSTREAMHUB_FORECAST_WINDOW_DAYS")
+	_ = v.BindEnv("forecast.alertDays", "UPSTREAMHUB_FORECAST_ALERT_DAYS")
+	_ = v.BindEnv("forecast.cooldownMinutes", "UPSTREAMHUB_FORECAST_COOLDOWN_MINUTES")
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -215,6 +231,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("notifications.minChangePct", 0)
 	v.SetDefault("notifications.balanceLowCooldownMinutes", 60)
 	v.SetDefault("notifications.sendMaxAttempts", 3)
+
+	v.SetDefault("forecast.windowDays", 7)
+	v.SetDefault("forecast.alertDays", 7)
+	v.SetDefault("forecast.cooldownMinutes", 720)
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "text")

@@ -13,11 +13,13 @@ import (
 //   - BatchRateChanges：同次扫描中合并多条 rate_changed 成一条消息
 //   - MinChangePct：涨跌幅小于阈值时跳过推送（仍写入 RateChangeLog 表）
 //   - BalanceLowCooldown：同渠道 balance_low 在窗口内不重复发送
+//   - ForecastCooldown：同渠道 balance_forecast_low（预计耗尽）在窗口内不重复发送
 //   - SendMaxAttempts：单条消息最多发送尝试次数（含首发），<=1 表示不重试
 type Policy struct {
 	BatchRateChanges   bool
 	MinChangePct       float64
 	BalanceLowCooldown time.Duration
+	ForecastCooldown   time.Duration
 	SendMaxAttempts    int
 }
 

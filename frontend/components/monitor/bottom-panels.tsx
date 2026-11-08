@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import {
   AlertTriangle,
   ArrowUpRight,
+  Hourglass,
   KeyRound,
   Pencil,
   Plus,
@@ -34,6 +35,7 @@ import type {
 
 const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string }> = {
   balance_low: { icon: AlertTriangle, cls: "text-warning" },
+  balance_forecast_low: { icon: Hourglass, cls: "text-warning" },
   login_failed: { icon: ShieldX, cls: "text-danger" },
   captcha_failed: { icon: KeyRound, cls: "text-danger" },
   rate_changed: { icon: ArrowUpRight, cls: "text-brand" },

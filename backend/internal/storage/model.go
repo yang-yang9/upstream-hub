@@ -181,6 +181,8 @@ type NotificationEvent string
 
 const (
 	EventBalanceLow    NotificationEvent = "balance_low"
+	// EventBalanceForecast 余额按当前消耗速率预计 N 天内耗尽（docs/specs/usage-forecast.md）。
+	EventBalanceForecast NotificationEvent = "balance_forecast_low"
 	EventRateChanged   NotificationEvent = "rate_changed"
 	EventLoginFailed   NotificationEvent = "login_failed"
 	EventCaptchaFailed NotificationEvent = "captcha_failed"

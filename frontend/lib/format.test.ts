@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest"
 import {
   channelTypeLabel,
+  depletionText,
   formatRatio,
   money,
   ratioArrow,
@@ -110,5 +111,18 @@ describe("shortTime", () => {
   it("空 / 非法输入返回占位符", () => {
     expect(shortTime(null)).toBe("—")
     expect(shortTime("bad")).toBe("—")
+  })
+})
+
+/** depletionText：消耗预测的剩余时间文案。对应 spec：docs/specs/usage-forecast.md AC-7。 */
+describe("depletionText", () => {
+  it("按天数 / 小时 / 已耗尽格式化", () => {
+    expect(depletionText(3.5)).toBe("预计 3.5 天后耗尽")
+    expect(depletionText(7)).toBe("预计 7 天后耗尽")
+    expect(depletionText(0.5)).toBe("预计 12 小时后耗尽")
+    expect(depletionText(0.02)).toBe("预计 1 小时后耗尽")
+    expect(depletionText(0)).toBe("已耗尽")
+    expect(depletionText(-1.5)).toBe("已耗尽")
+    expect(depletionText(Number.NaN)).toBe("已耗尽")
   })
 })

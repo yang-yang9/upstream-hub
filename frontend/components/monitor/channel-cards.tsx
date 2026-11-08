@@ -23,10 +23,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelRates } from "@/lib/queries"
+import { useChannelForecast, useChannels, useChannelRates } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
-import { channelTypeLabel, formatRatio, money, relativeTime } from "@/lib/format"
+import { channelTypeLabel, depletionText, formatRatio, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import type { Channel } from "@/lib/api-types"
@@ -258,6 +258,21 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
   )
 }
 
+/**
+ * 消耗预测行：余额持续下降的渠道展示"日均消耗 · 预计 X 天后耗尽"。
+ * 非消耗渠道（余额上升 / 持平 / 样本不足）与请求失败都不渲染，保持卡片安静。
+ * 对应 spec：docs/specs/usage-forecast.md AC-7。
+ */
+export function ForecastRow({ channelID }: { channelID: number }) {
+  const { data } = useChannelForecast(channelID)
+  if (!data?.depleting) return null
+  return (
+    <Row label="消耗预测">
+      {`${money(data.daily_burn)}/天 · ${depletionText(data.days_left)}`}
+    </Row>
+  )
+}
+
 export function ChannelCards() {
   const { data: channels, loading } = useChannels()
   const refresh = useTriggerRefresh()
@@ -448,6 +463,7 @@ export function ChannelCards() {
                     </span>
                   </Row>
                   <Row label="上次更新">{relativeTime(c.last_balance_at ?? c.updated_at)}</Row>
+                  <ForecastRow channelID={c.id} />
                   {c.last_error ? (
                     <div className="py-1">
                       <p className="break-all text-[11px] text-danger" title={c.last_error}>

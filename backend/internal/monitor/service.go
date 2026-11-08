@@ -22,6 +22,7 @@ type Service struct {
 	channelSvc  *channel.Service
 	dispatcher  *notify.Dispatcher
 	log         *slog.Logger
+	forecast    ForecastConfig
 }
 
 func NewService(
@@ -31,6 +32,7 @@ func NewService(
 	channelSvc *channel.Service,
 	dispatcher *notify.Dispatcher,
 	log *slog.Logger,
+	forecast ForecastConfig,
 ) *Service {
 	return &Service{
 		channels:    channels,
@@ -39,6 +41,7 @@ func NewService(
 		channelSvc:  channelSvc,
 		dispatcher:  dispatcher,
 		log:         log,
+		forecast:    forecast,
 	}
 }
 
@@ -116,7 +119,47 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 	if msg, ok := balanceLowMessage(c, res.Balance); ok {
 		_ = s.dispatcher.Dispatch(ctx, msg)
 	}
+	s.dispatchForecast(ctx, c)
 	return nil
+}
+
+// Forecast 现算某渠道的余额消耗预测（不落库，快照即真相）。
+// ok=false 表示无法预测（样本不足 / 非消耗状态）。
+func (s *Service) Forecast(channelID uint) (BurnForecast, bool, error) {
+	windowDays := s.forecast.WindowDays
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+	now := time.Now().UTC()
+	since := now.Add(-time.Duration(windowDays) * 24 * time.Hour)
+	samples, err := s.rates.ListBalanceSince(channelID, since)
+	if err != nil {
+		return BurnForecast{ChannelID: channelID, WindowDays: windowDays}, false, err
+	}
+	f, ok := forecastBurn(samples, now, windowDays)
+	f.ChannelID = channelID
+	return f, ok, nil
+}
+
+// dispatchForecast 余额扫描尾部：预测临近耗尽时发 balance_forecast_low。
+// 计算或发送失败只写日志，不影响扫描本身（对应 spec：docs/specs/usage-forecast.md AC-6）。
+func (s *Service) dispatchForecast(ctx context.Context, c *storage.Channel) {
+	if s.forecast.AlertDays <= 0 {
+		return
+	}
+	f, ok, err := s.Forecast(c.ID)
+	if err != nil {
+		s.log.Warn("forecast balance failed", "channel", c.Name, "err", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	if msg, ok := balanceForecastMessage(c, f, s.forecast.AlertDays); ok {
+		if err := s.dispatcher.Dispatch(ctx, msg); err != nil {
+			s.log.Warn("dispatch forecast notification failed", "channel", c.Name, "err", err)
+		}
+	}
 }
 
 // RefreshRates 单个渠道倍率刷新，可被 API 手动触发。

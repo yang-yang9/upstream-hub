@@ -81,7 +81,8 @@ func (d *Dispatcher) Send(ctx context.Context, ch *storage.NotificationChannel, 
 // 订阅过滤：渠道配置 Subscriptions 非空时，必须有任意一条订阅命中 msg 才发送；
 // 空订阅列表（""/null/[]）视为"订阅一切"，向后兼容已有通知渠道。
 //
-// 去抖：balance_low 同渠道在 BalanceLowCooldown 内不重复推送，状态在 PostgreSQL 里持久化。
+// 去抖：balance_low / balance_forecast_low 同渠道在各自冷却窗口内不重复推送，
+// 状态在 PostgreSQL 里持久化。
 // 失败：按 SendMaxAttempts 进行指数退避重试。
 func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
 	if d.suppress(msg) {
@@ -168,18 +169,20 @@ func subsetForSubscriptions(upstreamID uint, changes []RateChange, subs []Subscr
 	return out
 }
 
-// suppress 判断是否要按 cooldown 跳过本次发送。仅对 balance_low 生效。
+// suppress 判断是否要按 cooldown 跳过本次发送。
+// 只对带独立冷却配置的事件生效（balance_low / balance_forecast_low，见 cooldownForEvent）。
 func (d *Dispatcher) suppress(msg Message) bool {
-	if msg.Event != storage.EventBalanceLow {
+	cooldown, eligible := cooldownForEvent(d.policy, msg.Event)
+	if !eligible {
 		return false
 	}
 	if msg.ChannelID == 0 {
 		return false
 	}
-	if d.policy.BalanceLowCooldown <= 0 {
+	if cooldown <= 0 {
 		return false
 	}
-	ok, err := d.cooldown.TryClaimCooldown(msg.ChannelID, msg.Event, d.policy.BalanceLowCooldown)
+	ok, err := d.cooldown.TryClaimCooldown(msg.ChannelID, msg.Event, cooldown)
 	if err != nil {
 		if d.log != nil {
 			d.log.Warn("cooldown lookup failed, sending anyway",
@@ -191,10 +194,22 @@ func (d *Dispatcher) suppress(msg Message) bool {
 		d.log.Debug("notification suppressed by cooldown",
 			"event", msg.Event,
 			"channel_id", msg.ChannelID,
-			"cooldown", d.policy.BalanceLowCooldown,
+			"cooldown", cooldown,
 		)
 	}
 	return !ok
+}
+
+// cooldownForEvent 事件 → 冷却配置的映射。返回 false 表示该事件不参与冷却
+// （rate_changed 等高频事件由合并 / 阈值过滤控量，不用冷却）。
+func cooldownForEvent(p Policy, event storage.NotificationEvent) (time.Duration, bool) {
+	switch event {
+	case storage.EventBalanceLow:
+		return p.BalanceLowCooldown, true
+	case storage.EventBalanceForecast:
+		return p.ForecastCooldown, true
+	}
+	return 0, false
 }
 
 // fanout 广播给所有启用的通知渠道（仅给 Dispatch 用，DispatchRateBatch 自己控订阅切片）。

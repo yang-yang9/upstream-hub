@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -28,6 +29,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.POST("/:id/sync", func(c *gin.Context) { syncChannel(c, d) })
 	gp.GET("/:id/rates", func(c *gin.Context) { channelRates(c, d) })
 	gp.GET("/:id/balance-history", func(c *gin.Context) { balanceHistory(c, d) })
+	gp.GET("/:id/forecast", func(c *gin.Context) { channelForecast(c, d) })
 }
 
 type channelInput struct {
@@ -247,6 +249,26 @@ func balanceHistory(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+// channelForecast 某渠道的余额消耗预测（服务端现算，不落库）。
+// depleting=false 时数值字段为零值。对应 spec：docs/specs/usage-forecast.md AC-5。
+func channelForecast(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if _, err := d.Channels.FindByID(id); err != nil {
+		fail(c, http.StatusNotFound, fmt.Errorf("channel not found"))
+		return
+	}
+	f, _, err := d.Monitor.Forecast(id)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": f})
 }
 
 func uintParam(c *gin.Context, name string) (uint, error) {
