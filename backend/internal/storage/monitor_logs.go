@@ -47,3 +47,14 @@ func (r *MonitorLogs) DeleteBefore(cutoff time.Time) (int64, error) {
 	res := r.db.Where("started_at < ?", cutoff).Delete(&MonitorLog{})
 	return res.RowsAffected, res.Error
 }
+
+// LatestPerChannel 每 (channel_id, job) 取 started_at 最新的一条，按 (channel_id, job) 升序返回。
+// DISTINCT ON 是 PostgreSQL 特有语法（同 rates.go 的 date_trunc 聚合，只在真 PG 集成测试覆盖）。
+// 软删除渠道的日志仍会返回——"软删除渠道不出指标"的过滤在渲染层做渠道 join（metrics.Render）。
+func (r *MonitorLogs) LatestPerChannel() ([]MonitorLog, error) {
+	var list []MonitorLog
+	err := r.db.
+		Raw(`SELECT DISTINCT ON (channel_id, job) * FROM monitor_logs ORDER BY channel_id, job, started_at DESC`).
+		Scan(&list).Error
+	return list, err
+}

@@ -42,7 +42,8 @@
 - 余额趋势按小时 / 天聚合；渠道详情含倍率列表、余额历史、最近错误；渠道卡片含余额消耗预测
 - 面板内自升级：检查 GitHub release → 下载 → checksum 校验 → 换二进制 → 重启（支持 GITHUB_PROXY）
 - 单用户后台登录：账号密码 + HMAC token + 滑动续期 + 绝对上限
-- `/healthz` 健康检查（含 DB ping）；Docker Compose / 单二进制部署
+- `/healthz` 健康检查（含 DB ping）；`/metrics` Prometheus text format 暴露（余额 / 扫描成败 / 耗时，可选 Bearer token，spec 见 [specs/metrics-export.md](specs/metrics-export.md)）
+- Docker Compose / 单二进制部署
 
 ---
 
@@ -83,7 +84,7 @@
 | 12 | 并发扫描 | `ScanAllBalances` / `ScanAllRates` 是顺序 for 循环，渠道一多单轮时间线性膨胀（5 分钟硬超时可能被打满）。`SchedulerConfig.Concurrency` 字段存在但未使用 |
 | 13 | 失败退避 | 登录失败后每轮照常重试，打码平台费用被持续消耗。需要失败渠道的指数退避（如连续失败后按 2×、4×、8× 轮次拉长间隔） |
 | 14 | 配置热更新 | cron、通知 Policy、保留策略全在 env / config，改调度参数必须重启。可改为运行时 UI 可改并落库 |
-| 15 | `/metrics` 暴露 | 无法接入现成的 Prometheus / Grafana / 告警体系。对已有可观测基建的用户是接入断点 |
+| 15 | ~~`/metrics` 暴露~~（已完成，spec 见 [specs/metrics-export.md](specs/metrics-export.md)） | 无法接入现成的 Prometheus / Grafana / 告警体系。对已有可观测基建的用户是接入断点 |
 | 16 | 数据导出 | 倍率变化、余额历史不能导 CSV / JSON；渠道配置不能备份导出（换机迁移只能拷数据库） |
 | 17 | 出站 SSRF 校验 | updater 下载有 `validateDownloadURL`，notify 侧 Webhook 任意 URL 缺内网地址拦截，应对称补齐 |
 | 18 | 密钥轮换与登录加固 | APP_SECRET（加密密钥）无轮换路径；登录无失败锁定 / 2FA；无只读分享（只读 token / 公开只读面板），给同事看余额只能给管理员账号 |
@@ -94,7 +95,7 @@
 
 ```
 P0-1 消耗预测（✅ 已完成） → P1-4 失败冷却/恢复（✅ 已完成） → P0-2 跨渠道比价（✅ 已完成）
-    → P3-15 /metrics → 其余按需
+    → P3-15 /metrics（✅ 已完成） → 其余按需
 ```
 
 理由：P0 三项纯逻辑补齐、不新增数据依赖，性价比最高；P1-4 防刷屏是告警可靠性的前提；`/metrics` 打通已有可观测体系。

@@ -123,3 +123,4 @@ cd backend && go run ./cmd/server   # 需本地 PostgreSQL + 配置，见 deploy
 | [usage-forecast.md](specs/usage-forecast.md) | 余额消耗速率与到期预测 |
 | [failure-recovery.md](specs/failure-recovery.md) | 失败风暴防刷屏与恢复通知 |
 | [rate-compare.md](specs/rate-compare.md) | 跨渠道比价双视图 |
+| [metrics-export.md](specs/metrics-export.md) | /metrics Prometheus 暴露 |

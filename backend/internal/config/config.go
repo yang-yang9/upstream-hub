@@ -30,6 +30,8 @@ type ServerConfig struct {
 	Mode           string   `mapstructure:"mode"`
 	TrustedProxies []string `mapstructure:"trustedProxies"`
 	BaseURL        string   `mapstructure:"baseURL"`
+	// MetricsToken /metrics 端点的 Bearer token；空 = 公开（docs/specs/metrics-export.md）。
+	MetricsToken string `mapstructure:"metricsToken"`
 }
 
 type DatabaseConfig struct {
@@ -190,6 +192,7 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("forecast.cooldownMinutes", "UPSTREAMHUB_FORECAST_COOLDOWN_MINUTES")
 	_ = v.BindEnv("notifications.failureThreshold", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_THRESHOLD")
 	_ = v.BindEnv("notifications.failureCooldownMinutes", "UPSTREAMHUB_NOTIFICATIONS_FAILURE_COOLDOWN_MINUTES")
+	_ = v.BindEnv("server.metricsToken", "UPSTREAMHUB_METRICS_TOKEN")
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

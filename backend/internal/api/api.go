@@ -40,6 +40,10 @@ type Deps struct {
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
 	Frontend fs.FS
+
+	// MetricsToken 可选：/metrics 的 Bearer token；空 = 公开（内网默认，同 /healthz）。
+	// 配置后要求 Authorization: Bearer <token>（docs/specs/metrics-export.md AC-5）。
+	MetricsToken string
 }
 
 // Register 把所有路由挂到给定 gin engine。
@@ -56,6 +60,8 @@ func Register(r *gin.Engine, d *Deps) {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	registerMetrics(r, d)
 
 	api := r.Group("/api")
 	if d.Auth != nil {
@@ -92,7 +98,7 @@ func Register(r *gin.Engine, d *Deps) {
 //   - GET /          → 返回 index.html
 //   - GET /channels  → 返回 index.html（React Router 客户端路由）
 //
-// /api/*、/healthz 都已被前面的具体路由占了，不会走到这里。
+// /api/*、/healthz、/metrics 都已被前面的具体路由占了，不会走到这里。
 // 安全起见仍然做一次前缀拦截，避免任何意外情况下"未鉴权读 index.html"压到 /api 上。
 func registerFrontend(r *gin.Engine, dist fs.FS) {
 	fileServer := http.FileServer(http.FS(dist))
@@ -100,8 +106,8 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// 永远不让 SPA fallback 覆盖 API / 健康检查路径。
-		if strings.HasPrefix(path, "/api/") || path == "/healthz" {
+		// 永远不让 SPA fallback 覆盖 API / 健康检查 / 指标路径。
+		if reservedPath(path) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
@@ -116,6 +122,11 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 		}
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
+}
+
+// reservedPath SPA fallback 永不接管的路径：API、健康检查、指标端点。
+func reservedPath(path string) bool {
+	return strings.HasPrefix(path, "/api/") || path == "/healthz" || path == "/metrics"
 }
 
 // fail 统一错误响应。

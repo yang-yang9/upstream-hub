@@ -36,3 +36,25 @@ func TestNotificationsFailureConfigFromEnv(t *testing.T) {
 		t.Errorf("FailureCooldownMinutes from env = %d, want 15", cfg.Notifications.FailureCooldownMinutes)
 	}
 }
+
+// 对应 spec：docs/specs/metrics-export.md AC-5。
+// metricsToken 是 camelCase key，不被 EnvKeyReplacer 映射，必须显式 BindEnv；
+// 默认空 = /metrics 公开。
+func TestMetricsTokenFromEnv(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.MetricsToken != "" {
+		t.Errorf("default MetricsToken = %q, want empty（公开）", cfg.Server.MetricsToken)
+	}
+
+	t.Setenv("UPSTREAMHUB_METRICS_TOKEN", "secret")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.MetricsToken != "secret" {
+		t.Errorf("MetricsToken from env = %q, want %q", cfg.Server.MetricsToken, "secret")
+	}
+}

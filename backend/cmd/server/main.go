@@ -150,6 +150,8 @@ func main() {
 		Updater:    upd,
 		Log:        log,
 		Frontend:   frontendFS,
+
+		MetricsToken: cfg.Server.MetricsToken,
 	})
 
 	srv := &http.Server{

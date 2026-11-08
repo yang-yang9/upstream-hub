@@ -79,6 +79,59 @@ func TestMonitorLogsDeleteBefore(t *testing.T) {
 	}
 }
 
+// TestMonitorLogsLatestPerChannel DISTINCT ON 语义：每 (channel_id, job) 取 started_at
+// 最新一条，按 (channel_id, job) 升序返回。对应 spec：docs/specs/metrics-export.md AC-3。
+func TestMonitorLogsLatestPerChannel(t *testing.T) {
+	db := storagetest.Open(t)
+	m := storage.NewMonitorLogs(db)
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+
+	// channel 1 balance 有新旧两条：应只返回较新的失败那条。
+	seed := []storage.MonitorLog{
+		{ChannelID: 1, Job: storage.MonitorJobBalance, Success: true, DurationMS: 100, StartedAt: base, FinishedAt: base},
+		{ChannelID: 1, Job: storage.MonitorJobBalance, Success: false, ErrorMessage: "boom", DurationMS: 200, StartedAt: base.Add(time.Minute), FinishedAt: base.Add(time.Minute)},
+		{ChannelID: 1, Job: storage.MonitorJobRates, Success: true, DurationMS: 50, StartedAt: base.Add(2 * time.Minute), FinishedAt: base.Add(2 * time.Minute)},
+		{ChannelID: 2, Job: storage.MonitorJobBalance, Success: true, DurationMS: 30, StartedAt: base.Add(3 * time.Minute), FinishedAt: base.Add(3 * time.Minute)},
+	}
+	for i := range seed {
+		if err := m.Append(&seed[i]); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	got, err := m.LatestPerChannel()
+	if err != nil {
+		t.Fatalf("LatestPerChannel: %v", err)
+	}
+	want := []struct {
+		ch      uint
+		job     storage.MonitorJob
+		success bool
+		dur     int64
+	}{
+		{1, storage.MonitorJobBalance, false, 200}, // 取 started_at 最新的那条
+		{1, storage.MonitorJobRates, true, 50},
+		{2, storage.MonitorJobBalance, true, 30},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows = %d, want %d（每 channel+job 恰一条）: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		g := got[i]
+		if g.ChannelID != w.ch || g.Job != w.job || g.Success != w.success || g.DurationMS != w.dur {
+			t.Errorf("rows[%d] = {ch:%d job:%s success:%v dur:%d}, want {ch:%d job:%s success:%v dur:%d}",
+				i, g.ChannelID, g.Job, g.Success, g.DurationMS, w.ch, w.job, w.success, w.dur)
+		}
+	}
+
+	// 空表 → 空结果不报错。
+	storagetest.ResetTables(t, db, "monitor_logs")
+	got, err = m.LatestPerChannel()
+	if err != nil || len(got) != 0 {
+		t.Errorf("empty LatestPerChannel = %v, %v, want empty", got, err)
+	}
+}
+
 func TestChannelsMonitorAndBalance(t *testing.T) {
 	r := storagetest.Channels(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)

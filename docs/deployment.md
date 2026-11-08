@@ -329,6 +329,7 @@ ssh user@server '
 | UPSTREAMHUB_SERVER_MODE | `debug` | Gin 模式：`release` / `debug`。生产用 `release`。 |
 | UPSTREAMHUB_SERVER_BASEURL | `http://localhost:8418` | 对外 base URL。 |
 | UPSTREAMHUB_SERVER_TRUSTEDPROXIES | — | 受信代理 IP 列表，反代后部署时设置。 |
+| UPSTREAMHUB_METRICS_TOKEN | — | `/metrics` 端点的 Bearer token。留空 = 公开（内网默认，同 `/healthz`）；设置后抓取需带 `Authorization: Bearer <token>`。Prometheus 侧对应 `bearer_token` 配置。 |
 | UPSTREAMHUB_DATABASE_HOST | `localhost` | PostgreSQL 主机。compose 下默认指向 `postgres` 容器。 |
 | UPSTREAMHUB_DATABASE_PORT | `54329` | PostgreSQL 端口。compose 容器内为 `5432`。 |
 | UPSTREAMHUB_DATABASE_USER | — | 数据库用户。 |
