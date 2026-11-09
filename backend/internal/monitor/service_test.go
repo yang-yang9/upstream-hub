@@ -24,9 +24,10 @@ func TestServiceUpdateSettings(t *testing.T) {
 }
 
 // -race 下并发 UpdateSettings + settingsSnapshot 不出竞态
-// （对应边界用例「PUT 与扫描并发」）。
+// （对应边界用例「PUT 与扫描并发」）。初始值取在断言范围 1..4 内：
+// 读 goroutine 可能在首个写之前启动，会读到初始快照。
 func TestServiceUpdateSettingsConcurrent(t *testing.T) {
-	s := NewService(nil, nil, nil, nil, nil, nil, ForecastConfig{WindowDays: 7, AlertDays: 7}, nil, false)
+	s := NewService(nil, nil, nil, nil, nil, nil, ForecastConfig{WindowDays: 1, AlertDays: 7}, nil, false)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
