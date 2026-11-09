@@ -352,6 +352,11 @@ ssh user@server '
 | UPSTREAMHUB_NOTIFICATIONS_QUIETHOURS | *(空)* | 静默时段 `HH:MM-HH:MM`（服务器本地时区），窗口内全部通知不推送、不占冷却名额。空=关闭（7×24 照发）。跨午夜写法如 `23:00-08:00`；非法格式拒绝启动。 |
 | UPSTREAMHUB_NOTIFICATIONS_BALANCERECOVERY | `false` | 余额恢复通知开关。`true` = 低余额告警后余额回升到阈值之上时发"余额已恢复"（`balance_recovered`）。默认关闭；关闭时只维护内部状态列，通知行为不变。 |
 | UPSTREAMHUB_NOTIFICATIONS_SENDMAXATTEMPTS | `3` | 通知失败最大尝试次数（含首次），指数退避。 |
+| UPSTREAMHUB_NOTIFICATIONS_FAILURE_THRESHOLD | `3` | 连续失败 N 次才派发失败告警（滤瞬时抖动），1 = 每次失败即告警。 |
+| UPSTREAMHUB_NOTIFICATIONS_FAILURE_COOLDOWN_MINUTES | `60` | `login_failed` / `monitor_failed` 同渠道推送冷却分钟。0=不冷却。 |
+| UPSTREAMHUB_FORECAST_WINDOW_DAYS | `7` | 余额消耗线性回归窗口（天）。 |
+| UPSTREAMHUB_FORECAST_ALERT_DAYS | `7` | 预计耗尽天数 ≤ 该值时发 `balance_forecast_low` 告警，0=关闭。 |
+| UPSTREAMHUB_FORECAST_COOLDOWN_MINUTES | `720` | 同渠道预测告警冷却分钟（与 `balance_low` 冷却独立）。 |
 | **GITHUB_PROXY** *(特殊)* | — | 升级时访问 GitHub 的代理前缀，国内网络必填，如 `https://ghproxy.com`。详见下文「升级」。 |
 | UPSTREAMHUB_UPDATER_GITHUBREPO | `yang-yang9/upstream-hub` | 升级检查的 GitHub 仓库。fork 自用且自行发版时改成自己的 `owner/repo`。 |
 | UPSTREAMHUB_LOG_LEVEL | `info` | 日志等级。 |
@@ -359,7 +364,17 @@ ssh user@server '
 | **UPSTREAMHUB_HTTP_PORT** *(compose)* | `8080` | 宿主机映射端口（容器内仍是 8418）。 |
 | **UPSTREAMHUB_IMAGE_TAG** *(compose)* | `edge` | compose 拉取的镜像 tag。 |
 
----
+### 2.1 运行时热更新（/api/settings，P3-14）
+
+上表中的调度 cron、历史保留天数、通知策略（去抖 / 冷却 / 静默时段 / 重试 / 恢复通知）与消耗预测参数，共 17 项，支持**免重启热更新**——在面板「系统设置 → 运行参数」卡片修改并保存即生效，落库到 `app_settings` 表（单行覆盖）。行为规格见 [specs/runtime-settings.md](specs/runtime-settings.md)。
+
+优先级语义（重要）：
+
+- **从未在面板保存过**（库中无行）：行为与本节环境变量表完全一致，存量部署无感升级。
+- **保存过一次**：这 17 项**以数据库为准**，此后改 env / config.yaml 再重启也不会生效——要回到 env 值，在卡片点「恢复默认」（`DELETE /api/settings`，删掉覆盖行）。
+- `GET /api/settings` 始终返回当前生效值 + `saved` 标记，UI 不感知合并细节。
+
+不在热更新范围（重启生效）：数据库、鉴权、日志、端口、`APP_SECRET`、metrics token、`scheduler.concurrency`。API 会忽略请求体中这些字段。
 
 ## 三、鉴权与滑动续期
 

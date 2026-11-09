@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/worryzyy/upstream-hub/internal/crypto"
@@ -27,6 +28,9 @@ type Dispatcher struct {
 	log      *slog.Logger
 	policy   Policy
 	cooldown CooldownStore
+
+	// mu 保护 policy：UpdatePolicy（P3-14 热更新）可与运行中的 Dispatch 并发。
+	mu sync.RWMutex
 
 	// now 当前时刻（静默时段判定用）。生产取 time.Now；同包测试注入固定时刻。
 	now func() time.Time
@@ -61,6 +65,27 @@ func NewDispatcherWithStore(store NotifierStore, cipher *crypto.Cipher, log *slo
 
 // Policy 返回当前策略，便于调用方做条件分支（如是否走批量路径）。
 func (d *Dispatcher) Policy() Policy {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.policy
+}
+
+// UpdatePolicy 热更新去抖策略（P3-14）：下一次 Dispatch 立即按新值执行，
+// 无需重启。SendMaxAttempts <= 0 归一化为 1（与构造器同语义）。
+func (d *Dispatcher) UpdatePolicy(p Policy) {
+	if p.SendMaxAttempts <= 0 {
+		p.SendMaxAttempts = 1
+	}
+	d.mu.Lock()
+	d.policy = p
+	d.mu.Unlock()
+}
+
+// policySnapshot 取策略快照：一次 Dispatch 内多处读保持一致，
+// 且不与 UpdatePolicy 竞态。
+func (d *Dispatcher) policySnapshot() Policy {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.policy
 }
 
@@ -108,7 +133,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
 
 // quiet 当前时刻是否处于静默时段（未配置 = false）。
 func (d *Dispatcher) quiet() bool {
-	return d.policy.QuietHours.InWindow(d.now())
+	return d.policySnapshot().QuietHours.InWindow(d.now())
 }
 
 // DispatchRateBatch 把一次扫描收集到的多条 RateChange 按 Policy 合并 / 过滤后推送。
@@ -129,9 +154,10 @@ func (d *Dispatcher) DispatchRateBatch(ctx context.Context, channel *storage.Cha
 		}
 		return nil
 	}
+	p := d.policySnapshot()
 	filtered := make([]RateChange, 0, len(changes))
 	for _, c := range changes {
-		if c.ChangePctAbove(d.policy.MinChangePct) {
+		if c.ChangePctAbove(p.MinChangePct) {
 			filtered = append(filtered, c)
 		}
 	}
@@ -158,7 +184,7 @@ func (d *Dispatcher) DispatchRateBatch(ctx context.Context, channel *storage.Cha
 			continue
 		}
 
-		if d.policy.BatchRateChanges {
+		if p.BatchRateChanges {
 			merged := BuildBatchMessage(channel, matching)
 			if err := d.sendOne(ctx, &nch, merged); err != nil {
 				errs = append(errs, err)
@@ -202,7 +228,7 @@ func subsetForSubscriptions(upstreamID uint, changes []RateChange, subs []Subscr
 // per-channel 覆盖（msg.Cooldown）在全局值之后判定：键存在即替代全局时长，
 // 0 短路（不查冷却存储，每次都发）；其他事件的覆盖键不影响本事件。
 func (d *Dispatcher) suppress(msg Message) bool {
-	cooldown, eligible := cooldownForEvent(d.policy, msg.Event)
+	cooldown, eligible := cooldownForEvent(d.policySnapshot(), msg.Event)
 	if !eligible {
 		return false
 	}
@@ -307,7 +333,7 @@ func (d *Dispatcher) sendOne(ctx context.Context, ch *storage.NotificationChanne
 // 注意：所有错误都会重试，包括 "Telegram 401 unauthorized" 这类永久错误。
 // 单用户场景下，简单胜过复杂；如果反复重试相同 401，反正最多 SendMaxAttempts 次就停了。
 func (d *Dispatcher) sendWithRetry(ctx context.Context, channelName string, n Notifier, msg Message) error {
-	maxAttempts := d.policy.SendMaxAttempts
+	maxAttempts := d.policySnapshot().SendMaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}

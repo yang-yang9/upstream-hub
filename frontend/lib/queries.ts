@@ -14,6 +14,7 @@ import type {
   RateChangeLog,
   RateSnapshot,
   RateCompareResult,
+  RuntimeSettings,
   UpgradeCheckResult,
 } from "@/lib/api-types"
 
@@ -189,4 +190,9 @@ export function useCaptchaConfigs() {
 
 export function useUpgradeCheck() {
   return useApi<UpgradeCheckResult>("/upgrade/check")
+}
+
+/** 运行时配置（热更新）。对应 spec：docs/specs/runtime-settings.md AC-3。 */
+export function useRuntimeSettings() {
+  return useApi<RuntimeSettings>("/settings")
 }

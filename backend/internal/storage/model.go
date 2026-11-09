@@ -113,10 +113,10 @@ type CaptchaConfig struct {
 	Endpoint     string              `gorm:"size:512" json:"endpoint,omitempty"`
 	Extra        string              `gorm:"type:text" json:"extra,omitempty"`
 	// 同 Channel.MonitorEnabled：default:false 保证显式 false 如实落库。
-	Enabled bool `gorm:"default:false" json:"enabled"`
-	CreatedAt    time.Time           `json:"created_at"`
-	UpdatedAt    time.Time           `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt      `gorm:"index" json:"-"`
+	Enabled   bool           `gorm:"default:false" json:"enabled"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (CaptchaConfig) TableName() string { return "captcha_configs" }
@@ -185,10 +185,10 @@ type NotificationChannel struct {
 	ConfigCipher  string                  `gorm:"type:text;not null" json:"-"`
 	Subscriptions string                  `gorm:"type:text;not null;default:'[]'" json:"subscriptions"`
 	// 同 Channel.MonitorEnabled：default:false 保证显式 false 如实落库。
-	Enabled bool `gorm:"default:false" json:"enabled"`
-	CreatedAt     time.Time               `json:"created_at"`
-	UpdatedAt     time.Time               `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt          `gorm:"index" json:"-"`
+	Enabled   bool           `gorm:"default:false" json:"enabled"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (NotificationChannel) TableName() string { return "notification_channels" }
@@ -197,16 +197,16 @@ func (NotificationChannel) TableName() string { return "notification_channels" }
 type NotificationEvent string
 
 const (
-	EventBalanceLow    NotificationEvent = "balance_low"
+	EventBalanceLow NotificationEvent = "balance_low"
 	// EventBalanceForecast 余额按当前消耗速率预计 N 天内耗尽（docs/specs/usage-forecast.md）。
 	EventBalanceForecast NotificationEvent = "balance_forecast_low"
 	// EventBalanceRecovered 低余额告警后回升到阈值之上的恢复通知（docs/specs/balance-recovery.md）。
 	// 与失败类恢复事件同语义：不参与冷却，派发受 notifications.balanceRecovery 开关控制（默认关）。
 	EventBalanceRecovered NotificationEvent = "balance_recovered"
-	EventRateChanged   NotificationEvent = "rate_changed"
-	EventLoginFailed   NotificationEvent = "login_failed"
-	EventCaptchaFailed NotificationEvent = "captcha_failed"
-	EventMonitorFailed NotificationEvent = "monitor_failed"
+	EventRateChanged      NotificationEvent = "rate_changed"
+	EventLoginFailed      NotificationEvent = "login_failed"
+	EventCaptchaFailed    NotificationEvent = "captcha_failed"
+	EventMonitorFailed    NotificationEvent = "monitor_failed"
 	// EventLoginRecovered / EventMonitorRecovered 失败 streak 达阈值告警后的恢复通知
 	//（docs/specs/failure-recovery.md）。恢复事件不参与冷却（每失败周期天然至多一条）。
 	EventLoginRecovered   NotificationEvent = "login_recovered"
@@ -287,3 +287,40 @@ type MonitorLog struct {
 }
 
 func (MonitorLog) TableName() string { return "monitor_logs" }
+
+// AppSettings 运行时配置（P3-14，docs/specs/runtime-settings.md）：单行表（id 固定 1）。
+// 行不存在 = 沿用 env / config.yaml 推导值（存量部署无感升级）；一旦保存过，
+// 这 17 个字段以库为准。类型化列（而非 key-value 行）与既有 repo 风格一致。
+// json 标签即 GET/PUT /api/settings 的载荷形状（全量提交，无部分更新）。
+type AppSettings struct {
+	// ID 对外隐藏：单行语义由仓储层固定为 1，不接受调用方指定。
+	ID uint `gorm:"primaryKey" json:"-"`
+
+	BalanceCron string `gorm:"size:64;not null;default:''" json:"balance_cron"`
+	RateCron    string `gorm:"size:64;not null;default:''" json:"rate_cron"`
+	// RetentionCron 空 = 不调度清理任务（与 env 语义一致）。
+	RetentionCron string `gorm:"size:64;not null;default:''" json:"retention_cron"`
+	// 三个保留天数 0 = 该表不清理，永久保留。
+	RetentionMonitorLogsDays      int `gorm:"not null;default:0" json:"retention_monitor_logs_days"`
+	RetentionBalanceSnapshotsDays int `gorm:"not null;default:0" json:"retention_balance_snapshots_days"`
+	RetentionNotificationLogsDays int `gorm:"not null;default:0" json:"retention_notification_logs_days"`
+
+	BatchRateChanges          bool    `gorm:"not null;default:true" json:"batch_rate_changes"`
+	MinChangePct              float64 `gorm:"not null;default:0" json:"min_change_pct"`
+	BalanceLowCooldownMinutes int     `gorm:"not null;default:60" json:"balance_low_cooldown_minutes"`
+	FailureThreshold          int     `gorm:"not null;default:3" json:"failure_threshold"`
+	FailureCooldownMinutes    int     `gorm:"not null;default:60" json:"failure_cooldown_minutes"`
+	// QuietHours "HH:MM-HH:MM"，空 = 关闭静默。格式校验在 settings.Validate（复用 notify.ParseQuietHours）。
+	QuietHours      string `gorm:"size:16;not null;default:''" json:"quiet_hours"`
+	SendMaxAttempts int    `gorm:"not null;default:3" json:"send_max_attempts"`
+	// BalanceRecovery 余额恢复通知开关（P0-3）。
+	BalanceRecovery bool `gorm:"not null;default:false" json:"balance_recovery"`
+
+	ForecastWindowDays      int `gorm:"not null;default:7" json:"forecast_window_days"`
+	ForecastAlertDays       int `gorm:"not null;default:7" json:"forecast_alert_days"`
+	ForecastCooldownMinutes int `gorm:"not null;default:720" json:"forecast_cooldown_minutes"`
+
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (AppSettings) TableName() string { return "app_settings" }

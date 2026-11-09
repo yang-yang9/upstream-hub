@@ -5,6 +5,7 @@ package monitor
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/storage"
@@ -27,13 +28,33 @@ var _ FailureStreakStore = (*storage.Failures)(nil)
 // balance 与 rates 两个 job 共用，按事件计数会被对方的成功稀释（spec 背景）。
 // 派发出去的消息由 Dispatcher 的失败冷却做重发节流，tracker 不做"已告警"标记。
 type FailureTracker struct {
-	store     FailureStreakStore
+	store FailureStreakStore
+	log   *slog.Logger
+
+	// mu 保护 threshold：UpdateThreshold（P3-14 热更新）可与扫描中的
+	// OnFailure / OnSuccess 并发。
+	mu        sync.RWMutex
 	threshold int
-	log       *slog.Logger
 }
 
 func NewFailureTracker(store FailureStreakStore, threshold int, log *slog.Logger) *FailureTracker {
 	return &FailureTracker{store: store, threshold: threshold, log: log}
+}
+
+// UpdateThreshold 热更新连续失败阈值（P3-14，docs/specs/runtime-settings.md
+// AC-4）：缩小后已达新阈值的 streak 在下次失败时立即告警；放大后未达
+// 新阈值的 streak 保持静默。既有 streak 计数不动。
+func (t *FailureTracker) UpdateThreshold(n int) {
+	t.mu.Lock()
+	t.threshold = n
+	t.mu.Unlock()
+}
+
+// thresholdSnapshot 当前阈值快照（与 UpdateThreshold 并发安全）。
+func (t *FailureTracker) thresholdSnapshot() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.threshold
 }
 
 // OnFailure 记录一次连续失败，返回应派发的失败告警（nil = 静默）。
@@ -45,7 +66,7 @@ func (t *FailureTracker) OnFailure(c storage.Channel, job storage.MonitorJob, er
 		t.warn("record failure streak failed", c, job, sErr)
 		return failureMessage(c, job, err, 0)
 	}
-	if !shouldAlertFailure(count, t.threshold) {
+	if !shouldAlertFailure(count, t.thresholdSnapshot()) {
 		return nil
 	}
 	return failureMessage(c, job, err, count)
@@ -60,7 +81,7 @@ func (t *FailureTracker) OnSuccess(c storage.Channel, job storage.MonitorJob) *n
 		t.warn("take failure streak failed", c, job, err)
 		return nil
 	}
-	if s == nil || !recoveryEligible(s.Count, t.threshold) {
+	if s == nil || !recoveryEligible(s.Count, t.thresholdSnapshot()) {
 		return nil
 	}
 	return &notify.Message{

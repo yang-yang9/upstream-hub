@@ -747,3 +747,52 @@ func TestDispatchCooldownOverrideZeroDisables(t *testing.T) {
 		t.Errorf("cooldown claims = %d, want 0（覆盖 0 时短路，不查冷却存储）", cd.calls)
 	}
 }
+
+// ---------- 热更新（P3-14，docs/specs/runtime-settings.md AC-4） ----------
+
+// TDD red：UpdatePolicy 尚不存在（将在 dispatcher.go 实现）。
+// 静默时段开关热切换：下一次 Dispatch 即按新 Policy 判定（不追溯已发出的通知）。
+// 观测点：静默命中时 Dispatch 在查通知渠道之前就返回（fakeStore.listCalls 不变）。
+func TestUpdatePolicyHot(t *testing.T) {
+	f := &fakeStore{}
+	d := NewDispatcherWithStore(f, nil, nil, Policy{}, nil)
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	d.now = func() time.Time { return now }
+	msg := Message{Event: storage.EventBalanceLow, ChannelID: 1}
+
+	// 未配置静默：照常查渠道。
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("Dispatch 无静默: %v", err)
+	}
+	if f.listCalls != 1 {
+		t.Fatalf("无静默时 listCalls = %d, want 1", f.listCalls)
+	}
+
+	// 开启覆盖当前时刻的静默窗口：Dispatch 被拦在查渠道之前。
+	quiet, err := ParseQuietHours("11:00-13:00")
+	if err != nil {
+		t.Fatalf("parse quiet hours: %v", err)
+	}
+	d.UpdatePolicy(Policy{QuietHours: quiet})
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("Dispatch 静默中: %v", err)
+	}
+	if f.listCalls != 1 {
+		t.Errorf("静默窗口内不应查渠道，listCalls = %d, want 1", f.listCalls)
+	}
+
+	// 再关掉：恢复发送。
+	d.UpdatePolicy(Policy{})
+	if err := d.Dispatch(context.Background(), msg); err != nil {
+		t.Fatalf("Dispatch 关静默后: %v", err)
+	}
+	if f.listCalls != 2 {
+		t.Errorf("关静默后 listCalls = %d, want 2", f.listCalls)
+	}
+
+	// SendMaxAttempts <= 0 与构造器同语义归一化为 1。
+	d.UpdatePolicy(Policy{SendMaxAttempts: 0})
+	if got := d.Policy().SendMaxAttempts; got != 1 {
+		t.Errorf("UpdatePolicy 归一化 SendMaxAttempts = %d, want 1", got)
+	}
+}

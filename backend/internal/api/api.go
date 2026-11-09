@@ -15,6 +15,7 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/crypto"
 	"github.com/worryzyy/upstream-hub/internal/monitor"
 	"github.com/worryzyy/upstream-hub/internal/notify"
+	"github.com/worryzyy/upstream-hub/internal/settings"
 	"github.com/worryzyy/upstream-hub/internal/storage"
 	"github.com/worryzyy/upstream-hub/internal/updater"
 	"github.com/worryzyy/upstream-hub/internal/version"
@@ -37,6 +38,10 @@ type Deps struct {
 	Dispatcher *notify.Dispatcher
 	Updater    *updater.Updater
 	Log        *slog.Logger
+
+	// Settings 可选：运行时配置热更新服务（P3-14）。nil = 不挂 /api/settings
+	//（等价于关闭该端点；正常装配见 cmd/server/main.go）。
+	Settings *settings.Service
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
 	Frontend fs.FS
@@ -85,6 +90,7 @@ func Register(r *gin.Engine, d *Deps) {
 		registerMonitorLogs(api, d)
 		registerDashboard(api, d)
 		registerUpgrade(api, d)
+		registerSettings(api, d)
 	}
 
 	if d.Frontend != nil {

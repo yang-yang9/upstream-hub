@@ -342,6 +342,58 @@ func TestFailureTrackerOnSuccess(t *testing.T) {
 	})
 }
 
+// ---------- 阈值热更新（P3-14，docs/specs/runtime-settings.md AC-4） ----------
+
+// TDD red：UpdateThreshold 尚不存在（将在 monitor/failure.go 实现）。
+// 既有 streak 计数不清零，下一次失败 / 成功立即按新阈值判定
+// （边界用例「失败阈值调小不影响既有 streak」）。
+func TestFailureTrackerUpdateThreshold(t *testing.T) {
+	c := storage.Channel{ID: 7, Name: "alpha"}
+	boom := errors.New("dial tcp: boom")
+
+	t.Run("调小阈值：既有 streak 保留，下一次失败即告警", func(t *testing.T) {
+		f := newFakeStreakStore()
+		tr := NewFailureTracker(f, 5, nil)
+		if m := tr.OnFailure(c, storage.MonitorJobLogin, boom); m != nil {
+			t.Fatalf("count=1 阈值 5 不应告警，got %+v", m)
+		}
+		tr.UpdateThreshold(2)
+		m := tr.OnFailure(c, storage.MonitorJobLogin, boom) // count=2 >= 2
+		if m == nil {
+			t.Fatal("阈值调小后下一次失败应告警")
+		}
+		if !strings.Contains(m.Body, "连续失败 2 次") {
+			t.Errorf("body %q 应含既有 streak 计数 2", m.Body)
+		}
+		if f.recordCalls != 2 {
+			t.Errorf("既有计数不应被清零重算，recordCalls = %d, want 2", f.recordCalls)
+		}
+	})
+
+	t.Run("调大阈值：下一次失败回到静默", func(t *testing.T) {
+		f := newFakeStreakStore()
+		tr := NewFailureTracker(f, 2, nil)
+		tr.OnFailure(c, storage.MonitorJobLogin, boom) // count=1
+		if m := tr.OnFailure(c, storage.MonitorJobLogin, boom); m == nil {
+			t.Fatal("count=2 达阈值 2，应告警")
+		}
+		tr.UpdateThreshold(5)
+		if m := tr.OnFailure(c, storage.MonitorJobLogin, boom); m != nil {
+			t.Errorf("count=3 < 新阈值 5，不应告警，got %+v", m)
+		}
+	})
+
+	t.Run("恢复判定也按新阈值", func(t *testing.T) {
+		f := newFakeStreakStore()
+		f.streaks[streakKey(7, storage.MonitorJobLogin)] = storage.FailureStreak{Count: 3}
+		tr := NewFailureTracker(f, 5, nil)
+		tr.UpdateThreshold(3)
+		if m := tr.OnSuccess(c, storage.MonitorJobLogin); m == nil {
+			t.Fatal("streak=3 达新阈值 3，应发恢复通知")
+		}
+	})
+}
+
 // 对应 spec：docs/specs/quiet-hours-cooldown.md AC-5。
 // 失败告警与恢复消息同样携带渠道的冷却覆盖（Dispatcher 据此判定）。
 func TestFailureMessagesCarryCooldown(t *testing.T) {

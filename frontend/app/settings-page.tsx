@@ -4,13 +4,15 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
-import { useUpgradeCheck } from "@/lib/queries"
+import { useUpgradeCheck, useRuntimeSettings } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
+import { RuntimeSettingsCard } from "@/components/settings/runtime-settings-card"
 import { toast } from "sonner"
 
 export default function SettingsPage() {
   const { username } = useAuth()
   const { data: upgrade, loading, refetch } = useUpgradeCheck()
+  const { data: runtime } = useRuntimeSettings()
   const [upgrading, setUpgrading] = useState(false)
   const [upgraded, setUpgraded] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -46,9 +48,11 @@ export default function SettingsPage() {
       <header>
         <h1 className="text-lg font-semibold text-foreground">{"系统设置"}</h1>
         <p className="text-xs text-muted-foreground">
-          {"账户信息与运行参数。修改 cron / 数据库 / 加密密钥需要重启后端。"}
+          {"账户信息与运行参数。调度 / 通知 / 预测支持热更新；数据库 / 加密密钥仍需重启后端。"}
         </p>
       </header>
+
+      <RuntimeSettingsCard />
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Card className="border border-border shadow-none">
@@ -68,19 +72,23 @@ export default function SettingsPage() {
 
         <Card className="border border-border shadow-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold">{"调度计划"}</CardTitle>
+            <CardTitle className="text-base font-semibold">{"调度计划（当前生效）"}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{"余额扫描"}</span>
-              <span className="font-medium">{"每 15 分钟"}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">{"余额扫描"}</span>
+              <span className="font-mono text-xs font-medium">
+                {runtime ? (runtime.balance_cron || "已关闭") : "…"}
+              </span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">{"倍率扫描"}</span>
-              <span className="font-medium">{"每 30 分钟"}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">{"倍率扫描"}</span>
+              <span className="font-mono text-xs font-medium">
+                {runtime ? (runtime.rate_cron || "已关闭") : "…"}
+              </span>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              {"修改 backend/config.yaml 的 scheduler 段，重启后端生效。"}
+              {"来自上方运行参数卡片，保存后即时生效；留空 = 关闭对应任务。"}
             </p>
           </CardContent>
         </Card>

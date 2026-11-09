@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/worryzyy/upstream-hub/internal/channel"
@@ -22,8 +23,13 @@ type Service struct {
 	channelSvc  *channel.Service
 	dispatcher  *notify.Dispatcher
 	log         *slog.Logger
-	forecast    ForecastConfig
 	failures    *FailureTracker
+
+	// mu 保护 forecast / balanceRecovery：UpdateSettings（P3-14 热更新）
+	// 可与运行中的扫描并发。
+	mu sync.RWMutex
+	// forecast 预测窗口参数（读取走 settingsSnapshot）。
+	forecast ForecastConfig
 	// balanceRecovery 余额恢复通知开关（P0-3，docs/specs/balance-recovery.md）：
 	// false = 只维护 balance_low_active 状态列，不派发 balance_recovered。
 	balanceRecovery bool
@@ -51,6 +57,23 @@ func NewService(
 		failures:        failures,
 		balanceRecovery: balanceRecovery,
 	}
+}
+
+// UpdateSettings 热更新预测参数与余额恢复开关（P3-14，docs/specs/runtime-settings.md
+// AC-4）：下一次扫描立即按新值执行，无需重启。构造器签名不变。
+func (s *Service) UpdateSettings(f ForecastConfig, balanceRecovery bool) {
+	s.mu.Lock()
+	s.forecast = f
+	s.balanceRecovery = balanceRecovery
+	s.mu.Unlock()
+}
+
+// settingsSnapshot 取当前生效的预测参数与余额恢复开关（读锁快照，
+// 与 UpdateSettings 并发安全）。
+func (s *Service) settingsSnapshot() (ForecastConfig, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.forecast, s.balanceRecovery
 }
 
 // ScanAllBalances 扫描所有启用监控的渠道余额。单个失败不影响其他。
@@ -141,7 +164,8 @@ func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error 
 // 标记 / 清除不受开关影响；回升且开关开时派发 balance_recovered。
 // 状态持久化失败 fail-open 照发通知（漏标记可接受、漏通知不可接受，与 P1-4 同语义）。
 func (s *Service) trackBalanceState(ctx context.Context, c *storage.Channel, balance float64) {
-	plan := balanceStatePlan(c, balance, s.balanceRecovery)
+	_, balanceRecovery := s.settingsSnapshot()
+	plan := balanceStatePlan(c, balance, balanceRecovery)
 	if plan.changed {
 		if err := s.channels.SetBalanceLowActive(c.ID, plan.low); err != nil {
 			s.log.Warn("set balance_low_active failed", "channel", c.Name, "err", err)
@@ -159,7 +183,8 @@ func (s *Service) trackBalanceState(ctx context.Context, c *storage.Channel, bal
 // Forecast 现算某渠道的余额消耗预测（不落库，快照即真相）。
 // ok=false 表示无法预测（样本不足 / 非消耗状态）。
 func (s *Service) Forecast(channelID uint) (BurnForecast, bool, error) {
-	windowDays := s.forecast.WindowDays
+	fc, _ := s.settingsSnapshot()
+	windowDays := fc.WindowDays
 	if windowDays <= 0 {
 		windowDays = 7
 	}
@@ -191,7 +216,8 @@ func (s *Service) RateCompare(minChannels int) (RateCompareResult, error) {
 // dispatchForecast 余额扫描尾部：预测临近耗尽时发 balance_forecast_low。
 // 计算或发送失败只写日志，不影响扫描本身（对应 spec：docs/specs/usage-forecast.md AC-6）。
 func (s *Service) dispatchForecast(ctx context.Context, c *storage.Channel) {
-	if s.forecast.AlertDays <= 0 {
+	fc, _ := s.settingsSnapshot()
+	if fc.AlertDays <= 0 {
 		return
 	}
 	f, ok, err := s.Forecast(c.ID)
@@ -202,7 +228,7 @@ func (s *Service) dispatchForecast(ctx context.Context, c *storage.Channel) {
 	if !ok {
 		return
 	}
-	if msg, ok := balanceForecastMessage(c, f, s.forecast.AlertDays); ok {
+	if msg, ok := balanceForecastMessage(c, f, fc.AlertDays); ok {
 		if err := s.dispatcher.Dispatch(ctx, msg); err != nil {
 			s.log.Warn("dispatch forecast notification failed", "channel", c.Name, "err", err)
 		}

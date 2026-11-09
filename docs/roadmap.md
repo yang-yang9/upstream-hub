@@ -85,7 +85,7 @@
 |---|------|------|
 | 12 | 并发扫描 | `ScanAllBalances` / `ScanAllRates` 是顺序 for 循环，渠道一多单轮时间线性膨胀（5 分钟硬超时可能被打满）。`SchedulerConfig.Concurrency` 字段存在但未使用 |
 | 13 | 失败退避 | 登录失败后每轮照常重试，打码平台费用被持续消耗。需要失败渠道的指数退避（如连续失败后按 2×、4×、8× 轮次拉长间隔） |
-| 14 | 配置热更新 | cron、通知 Policy、保留策略全在 env / config，改调度参数必须重启。可改为运行时 UI 可改并落库 |
+| 14 | ~~配置热更新~~（已完成，spec 见 [specs/runtime-settings.md](specs/runtime-settings.md)） | cron、通知 Policy、保留策略全在 env / config，改调度参数必须重启。可改为运行时 UI 可改并落库 |
 | 15 | ~~`/metrics` 暴露~~（已完成，spec 见 [specs/metrics-export.md](specs/metrics-export.md)） | 无法接入现成的 Prometheus / Grafana / 告警体系。对已有可观测基建的用户是接入断点 |
 | 16 | 数据导出 | 倍率变化、余额历史不能导 CSV / JSON；渠道配置不能备份导出（换机迁移只能拷数据库） |
 | 17 | 出站 SSRF 校验 | updater 下载有 `validateDownloadURL`，notify 侧 Webhook 任意 URL 缺内网地址拦截，应对称补齐 |

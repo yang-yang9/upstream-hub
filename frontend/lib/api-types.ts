@@ -218,3 +218,30 @@ export interface UpgradeCheckResult {
   html_url: string
   warning?: string
 }
+
+/**
+ * 运行时配置（GET /api/settings，docs/specs/runtime-settings.md）。
+ * 17 个热更新字段（snake_case 与后端 storage.AppSettings json tag 一一对应）；
+ * saved = app_settings 是否存在覆盖行（false = 当前值来自 env / config.yaml）。
+ */
+export interface RuntimeSettings {
+  balance_cron: string
+  rate_cron: string
+  retention_cron: string
+  retention_monitor_logs_days: number
+  retention_balance_snapshots_days: number
+  retention_notification_logs_days: number
+  batch_rate_changes: boolean
+  min_change_pct: number
+  balance_low_cooldown_minutes: number
+  failure_threshold: number
+  failure_cooldown_minutes: number
+  quiet_hours: string
+  send_max_attempts: number
+  balance_recovery: boolean
+  forecast_window_days: number
+  forecast_alert_days: number
+  forecast_cooldown_minutes: number
+  saved: boolean
+  updated_at: string | null
+}

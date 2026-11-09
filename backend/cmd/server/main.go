@@ -22,6 +22,7 @@ import (
 	"github.com/worryzyy/upstream-hub/internal/monitor"
 	"github.com/worryzyy/upstream-hub/internal/notify"
 	"github.com/worryzyy/upstream-hub/internal/scheduler"
+	"github.com/worryzyy/upstream-hub/internal/settings"
 	"github.com/worryzyy/upstream-hub/internal/storage"
 	"github.com/worryzyy/upstream-hub/internal/updater"
 	"github.com/worryzyy/upstream-hub/internal/version"
@@ -94,34 +95,58 @@ func main() {
 	monLogs := storage.NewMonitorLogs(db)
 	failures := storage.NewFailures(db)
 
+	// 运行时配置（P3-14，docs/specs/runtime-settings.md）：env / config.yaml
+	// 推导基线 + app_settings 单行表覆盖。无行时 eff 与基线逐字段一致，
+	// 存量部署行为零变化。
+	appSettings := storage.NewAppSettings(db)
+	base := settings.FromConfig(cfg)
+	settingsSvc := settings.NewService(appSettings, base)
+	if err := settingsSvc.Init(); err != nil {
+		log.Error("load runtime settings failed", "err", err)
+		os.Exit(1)
+	}
+	eff := settingsSvc.Current()
+
 	channelSvc := channel.NewService(channels, authSessions, captchas, monLogs, cipher)
-	quiet, err := notify.ParseQuietHours(cfg.Notifications.QuietHours)
-	if err != nil {
+	// env 静默时段配置非法仍 fail-fast（与热更新路径的 400 校验区分）。
+	if _, err := notify.ParseQuietHours(cfg.Notifications.QuietHours); err != nil {
 		log.Error("解析静默时段配置失败", "err", err)
 		os.Exit(1)
 	}
-	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
-		BatchRateChanges:   cfg.Notifications.BatchRateChanges,
-		MinChangePct:       cfg.Notifications.MinChangePct,
-		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
-		ForecastCooldown:   time.Duration(cfg.Forecast.CooldownMinutes) * time.Minute,
-		FailureCooldown:    time.Duration(cfg.Notifications.FailureCooldownMinutes) * time.Minute,
-		QuietHours:         quiet,
-		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
-	})
-	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log, monitor.ForecastConfig{
-		WindowDays: cfg.Forecast.WindowDays,
-		AlertDays:  cfg.Forecast.AlertDays,
-	}, monitor.NewFailureTracker(failures, cfg.Notifications.FailureThreshold, log), cfg.Notifications.BalanceRecovery)
+	dispatcher := notify.NewDispatcher(notifies, cipher, log, settings.PolicyOf(eff))
+	tracker := monitor.NewFailureTracker(failures, eff.FailureThreshold, log)
+	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, log,
+		settings.MonitorForecastOf(eff), tracker, eff.BalanceRecovery)
 
 	upd := updater.New(cfg.Updater.GithubRepo, cfg.Updater.GithubProxy, log)
 
-	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, log)
+	schCfg := settings.SchedulerConfigOf(eff)
+	schCfg.Concurrency = cfg.Scheduler.Concurrency
+	sch := scheduler.New(schCfg, monitorSvc, monLogs, rates, notifies, log)
 	if err := sch.Start(); err != nil {
 		log.Error("start scheduler failed", "err", err)
 		os.Exit(1)
 	}
 	defer sch.Stop()
+
+	// 热更新传播：PUT / DELETE /api/settings 成功后推送新值到各组件。
+	// scheduler 的 Concurrency 不在热更新范围，永远取 env 值。
+	settingsSvc.OnApply(func(v storage.AppSettings) {
+		dispatcher.UpdatePolicy(settings.PolicyOf(v))
+	})
+	settingsSvc.OnApply(func(v storage.AppSettings) {
+		monitorSvc.UpdateSettings(settings.MonitorForecastOf(v), v.BalanceRecovery)
+	})
+	settingsSvc.OnApply(func(v storage.AppSettings) {
+		tracker.UpdateThreshold(v.FailureThreshold)
+	})
+	settingsSvc.OnApply(func(v storage.AppSettings) {
+		scfg := settings.SchedulerConfigOf(v)
+		scfg.Concurrency = cfg.Scheduler.Concurrency
+		if err := sch.Reconfigure(scfg); err != nil {
+			log.Warn("热更新调度配置失败（沿用旧计划，重启后生效）", "err", err)
+		}
+	})
 
 	gin.SetMode(cfg.Server.Mode)
 	router := gin.New()
@@ -158,6 +183,7 @@ func main() {
 		Frontend:   frontendFS,
 
 		MetricsToken: cfg.Server.MetricsToken,
+		Settings:     settingsSvc,
 	})
 
 	srv := &http.Server{
