@@ -333,7 +333,7 @@ ssh user@server '
 | UPSTREAMHUB_DATABASE_HOST | `localhost` | PostgreSQL 主机。compose 下默认指向 `postgres` 容器。 |
 | UPSTREAMHUB_DATABASE_PORT | `54329` | PostgreSQL 端口。compose 容器内为 `5432`。 |
 | UPSTREAMHUB_DATABASE_USER | — | 数据库用户。 |
-| UPSTREAMHUB_DATABASE_PASSWORD | — | 数据库密码。 |
+| UPSTREAMHUB_DATABASE_PASSWORD | — | 数据库密码。可为空（本地 socket / trust 认证场景）；含空格或引号的密码也支持。 |
 | UPSTREAMHUB_DATABASE_NAME | — | 数据库名。 |
 | UPSTREAMHUB_DATABASE_SSLMODE | `disable` | PG SSL 模式。 |
 | UPSTREAMHUB_DATABASE_TIMEZONE | `Asia/Shanghai` | 数据库时区。 |

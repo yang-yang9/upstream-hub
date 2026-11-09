@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -23,10 +24,22 @@ type DBConfig struct {
 	MaxIdleConns int
 }
 
+// quoteDSNValue 按 libpq 关键字-值语法把值包进单引号并转义反斜杠与单引号。
+//
+// password 不加引号时，空值（password=）或含空格的值会让 libpq / pgx 的
+// parser 丢掉其后的 dbname —— 连接落到与用户同名的库上报
+// "database ... does not exist"。统一引号包裹对合法值是无操作，
+// 却让空密码 / 特殊字符密码都能无损往返。见 dsn_test.go 的回归用例。
+func quoteDSNValue(v string) string {
+	r := strings.NewReplacer(`\`, `\\`, `'`, `\'`)
+	return "'" + r.Replace(v) + "'"
+}
+
 func (c DBConfig) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		c.Host, c.Port, c.User, c.Password, c.Name, c.SSLMode, c.Timezone,
+		quoteDSNValue(c.Host), c.Port, quoteDSNValue(c.User), quoteDSNValue(c.Password),
+		quoteDSNValue(c.Name), quoteDSNValue(c.SSLMode), quoteDSNValue(c.Timezone),
 	)
 }
 
