@@ -35,11 +35,17 @@ func quoteDSNValue(v string) string {
 	return "'" + r.Replace(v) + "'"
 }
 
+// DSN 生成 gorm postgres driver 可用的连接串。
+//
+// TimeZone 是唯一例外、必须裸值：gorm.io/driver/postgres 不信任 pgconn
+// 的解析结果，用自带的正则 `TimeZone=(.*?)( |$)` 从 DSN 原文截取值塞进
+// RuntimeParams——带引号会得到 "'Asia/Shanghai'"，连接时报
+// FATAL: invalid value for parameter "TimeZone"。
 func (c DBConfig) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
 		quoteDSNValue(c.Host), c.Port, quoteDSNValue(c.User), quoteDSNValue(c.Password),
-		quoteDSNValue(c.Name), quoteDSNValue(c.SSLMode), quoteDSNValue(c.Timezone),
+		quoteDSNValue(c.Name), quoteDSNValue(c.SSLMode), c.Timezone,
 	)
 }
 

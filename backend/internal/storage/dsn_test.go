@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -57,5 +58,35 @@ func TestDBConfigDSN(t *testing.T) {
 				t.Errorf("Password = %q, want %q（quote/escape 往返必须无损）", parsed.Password, tc.cfg.Password)
 			}
 		})
+	}
+}
+
+// gorm postgres driver 用自带正则从 DSN 原文截取 TimeZone 塞进
+// RuntimeParams（gorm.io/driver/postgres@v1.5.11 postgres.go timeZoneMatcher），
+// 不走 pgconn 的去引号逻辑。因此 TimeZone 必须是裸值——带引号会得到
+// "'Asia/Shanghai'"，连接时 FATAL: invalid value for parameter "TimeZone"。
+// 这里用同款正则钉住该约束。
+var gormTimeZoneMatcher = regexp.MustCompile(`(time_zone|TimeZone)=(.*?)($|&| )`)
+
+func TestDBConfigDSNTimeZoneRaw(t *testing.T) {
+	cfg := DBConfig{Host: "localhost", Port: 5432, User: "uh", Password: "secret",
+		Name: "upstreamhub", SSLMode: "disable", Timezone: "Asia/Shanghai"}
+
+	dsn := cfg.DSN()
+	m := gormTimeZoneMatcher.FindStringSubmatch(dsn)
+	if len(m) <= 2 {
+		t.Fatalf("DSN 里找不到 TimeZone 段: %q", dsn)
+	}
+	if m[2] != "Asia/Shanghai" {
+		t.Errorf("gorm 正则截取的 TimeZone = %q, want 裸值 %q（不能带引号）", m[2], "Asia/Shanghai")
+	}
+
+	// pgconn 侧的往返也要成立。
+	parsed, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("ParseConfig(%q): %v", dsn, err)
+	}
+	if got := parsed.RuntimeParams["TimeZone"]; got != "Asia/Shanghai" {
+		t.Errorf("RuntimeParams[TimeZone] = %q, want %q", got, "Asia/Shanghai")
 	}
 }
